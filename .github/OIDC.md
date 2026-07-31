@@ -8,15 +8,14 @@ Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWeb
 
 means this **repository is not listed** in the IAM role trust policy — not a workflow bug.
 
-## Fix (Shared-Services account, SRE)
+## Fix (Shared-Services account — **SRE** permission set)
+
+IAM trust policy edits require the **SRE** permission set on Shared-Services (`aws sso login --profile mentorhub-sre` or IAM console as SRE). **`Developer-Packages`** (the default `mentorhub-shared` profile from `make aws-setup`) is CodeArtifact read-only and cannot edit IAM roles.
+
+**New repos (created after 2026-07-15)** may use GitHub's **immutable OIDC `sub` claim** (`repo:mentor-forge@ORG_ID/repo@REPO_ID:ref:...`). Add both classic and immutable patterns — see mentorhub_cloudformation `docs/github-ci.md` § Immutable OIDC subjects.
 
 1. IAM → Roles → **`GitHubActionsCodeArtifactRead`** → Trust relationships → Edit.
-2. Add to `token.actions.githubusercontent.com:sub`:
-
-   ```text
-   repo:mentor-forge/mentorhub_discovery_api:ref:refs/heads/main
-   ```
-
+2. Add subjects for this repo (classic and/or immutable format from `gh api repos/mentor-forge/mentorhub_discovery_api/actions/oidc/customization/sub`).
 3. Re-run the failed workflow on `main`.
 
 Also add **`mentorhub_admin_api`**, **`mentorhub_admin_spa`**, and **`mentorhub_discovery_spa`** when those repos merge to `main`.
