@@ -1,0 +1,86 @@
+"""
+Flask MongoDB API Server
+
+Discovery API for the Mentor Hub system — customer and profile list/get endpoints.
+"""
+
+import sys
+import os
+import signal
+from flask import Flask, send_from_directory
+
+# Initialize Config Singleton (doesn't require external services)
+from api_utils import Config
+
+config = Config.get_instance()
+
+# Initialize logging (Config constructor configures logging)
+import logging
+
+logger = logging.getLogger(__name__)
+logger.info("============= Starting Server ===============")
+
+# Initialize MongoIO Singleton and set enumerators and versions
+from api_utils import MongoIO
+
+mongo = MongoIO.get_instance()
+config.set_enumerators(mongo.get_documents(config.ENUMERATORS_COLLECTION_NAME))
+config.set_versions(mongo.get_documents(config.VERSIONS_COLLECTION_NAME))
+
+# Initialize Flask App
+from api_utils import MongoJSONEncoder
+
+app = Flask(__name__)
+app.json = MongoJSONEncoder(app)
+
+# Route registration (all grouped together)
+from api_utils import create_metric_routes, create_config_routes, create_explorer_routes
+from src.routes.profile_routes import create_profile_routes
+from src.routes.customer_routes import create_customer_routes
+
+# Register route blueprints
+docs_dir = os.path.join(os.path.dirname(__file__), "..", "docs")
+app.register_blueprint(create_explorer_routes(docs_dir), url_prefix="/docs")
+app.register_blueprint(create_config_routes(), url_prefix="/api/config")
+app.register_blueprint(create_profile_routes(), url_prefix="/api/profile")
+app.register_blueprint(create_customer_routes(), url_prefix="/api/customer")
+metrics = create_metric_routes(app)  # This exposes /metrics endpoint
+
+logger.info("============= Routes Registered ===============")
+logger.info("  /api/config - Configuration endpoint")
+logger.info("  /api/profile - Profile domain endpoints")
+logger.info("  /api/customer - Customer domain endpoints")
+logger.info("  /docs - API Explorer")
+logger.info("  /metrics - Prometheus metrics endpoint")
+
+# Default discovery API port (architecture.yaml); override via API_PORT env in compose/dev.
+DISCOVERY_API_PORT = 8397
+
+
+# Define a signal handler for SIGTERM and SIGINT
+def handle_exit(signum, frame):
+    """Handle graceful shutdown on SIGTERM/SIGINT."""
+    global mongo
+    logger.info(f"Received signal {signum}. Initiating shutdown...")
+
+    # Disconnect from MongoDB if connected
+    if mongo is not None:
+        logger.info("Closing MongoDB connection.")
+        try:
+            mongo.disconnect()
+        except Exception as e:
+            logger.error(f"Error disconnecting from MongoDB: {e}")
+
+    logger.info("Shutdown complete.")
+    sys.exit(0)
+
+
+# Register the signal handler
+signal.signal(signal.SIGTERM, handle_exit)
+signal.signal(signal.SIGINT, handle_exit)
+
+# Expose app for Gunicorn or direct execution
+if __name__ == "__main__":
+    api_port = int(os.environ.get("API_PORT", DISCOVERY_API_PORT))
+    logger.info(f"Starting Flask server on port {api_port}")
+    app.run(host="0.0.0.0", port=api_port, debug=False)
