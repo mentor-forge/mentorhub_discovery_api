@@ -1,0 +1,429 @@
+openapi: 3.0.3
+info:
+  title: Mentor Hub Discovery API
+  description: |
+    A Flask + MongoDB API for the Discovery service (customer and profile list/get).
+
+    ## Authentication
+    All endpoints (except `/metrics`) require JWT authentication via the `Authorization` header:
+    ```
+    Authorization: Bearer <token>
+    ```
+
+    For local development, obtain a JWT from the Developer Edition welcome / IdP flow, or use a
+    test token from `test/e2e/e2e_auth.py` that matches your `JWT_SECRET` and expected claims.
+  version: 0.1.0
+  contact:
+    name: Mentor Forge
+    email: info@agile-learning-institute.com
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: http://localhost:8397
+    description: Local development server
+
+tags:
+  - name: Config
+    description: Configuration endpoints
+  - name: Metrics
+    description: Monitoring endpoints
+  - name: Profile
+    description: Profile operations (read-only)
+  - name: Customer
+    description: Customer operations (read-only)
+
+paths:
+  /api/config:
+    get:
+      tags:
+        - Config
+      summary: Get configuration
+      description: Returns the current configuration as JSON (requires authentication)
+      operationId: getConfig
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Configuration retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  config_items:
+                    type: array
+                    items:
+                      type: object
+                  versions:
+                    type: array
+                    items:
+                      type: object
+                  enumerators:
+                    type: array
+                    items:
+                      type: object
+                  token:
+                    type: object
+        '401':
+          description: Unauthorized - Invalid or missing token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /metrics:
+    get:
+      tags:
+        - Metrics
+      summary: Prometheus metrics
+      description: Returns Prometheus-formatted metrics
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics retrieved successfully
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/profile:
+    get:
+      tags:
+        - Profile
+      summary: Get all Profile documents
+      description: Retrieve infinite scroll batch of sorted, filtered Profile documents (read-only)
+      operationId: getProfiles
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: Optional name filter (supports partial matches, case-insensitive)
+          schema:
+            type: string
+            example: my-profile
+        - name: after_id
+          in: query
+          required: false
+          description: Cursor for infinite scroll (ID of last item from previous batch, omit for first request)
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{24}$'
+            example: 507f1f77bcf86cd799439011
+        - name: limit
+          in: query
+          required: false
+          description: Items per page (max 100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+            example: 10
+        - name: sort_by
+          in: query
+          required: false
+          description: Field to sort by (name, description)
+          schema:
+            type: string
+            default: name
+            example: name
+        - name: order
+          in: query
+          required: false
+          description: Sort order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+            example: asc
+      responses:
+        '200':
+          description: Successfully retrieved Profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - limit
+                  - has_more
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Profile'
+                  limit:
+                    type: integer
+                    example: 10
+                  has_more:
+                    type: boolean
+                    example: true
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    pattern: '^[0-9a-fA-F]{24}$'
+                    example: 507f1f77bcf86cd799439011
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/profile/{profile_id}:
+    get:
+      tags:
+        - Profile
+      summary: Get Profile by ID
+      description: Retrieve a specific Profile document by its ID (read-only)
+      operationId: getProfile
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: profile_id
+          in: path
+          required: true
+          description: The Profile ID (MongoDB ObjectId)
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{24}$'
+            example: 507f1f77bcf86cd799439011
+      responses:
+        '200':
+          description: Successfully retrieved Profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/customer:
+    get:
+      tags:
+        - Customer
+      summary: Get all Customer documents
+      description: Retrieve infinite scroll batch of sorted, filtered Customer documents (read-only)
+      operationId: getCustomers
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: name
+          in: query
+          required: false
+          description: Optional name filter (supports partial matches, case-insensitive)
+          schema:
+            type: string
+            example: my-customer
+        - name: after_id
+          in: query
+          required: false
+          description: Cursor for infinite scroll (ID of last item from previous batch, omit for first request)
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{24}$'
+            example: 507f1f77bcf86cd799439011
+        - name: limit
+          in: query
+          required: false
+          description: Items per page (max 100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+            example: 10
+        - name: sort_by
+          in: query
+          required: false
+          description: Field to sort by (name, description)
+          schema:
+            type: string
+            default: name
+            example: name
+        - name: order
+          in: query
+          required: false
+          description: Sort order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+            example: asc
+      responses:
+        '200':
+          description: Successfully retrieved Customers
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - items
+                  - limit
+                  - has_more
+                  - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Customer'
+                  limit:
+                    type: integer
+                    example: 10
+                  has_more:
+                    type: boolean
+                    example: true
+                  next_cursor:
+                    type: string
+                    nullable: true
+                    pattern: '^[0-9a-fA-F]{24}$'
+                    example: 507f1f77bcf86cd799439011
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/customer/{customer_id}:
+    get:
+      tags:
+        - Customer
+      summary: Get Customer by ID
+      description: Retrieve a specific Customer document by its ID (read-only)
+      operationId: getCustomer
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: customer_id
+          in: path
+          required: true
+          description: The Customer ID (MongoDB ObjectId)
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{24}$'
+            example: 507f1f77bcf86cd799439011
+      responses:
+        '200':
+          description: Successfully retrieved Customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT issued by your identity provider (Developer Edition welcome flow for local dev).
+        Include the token in the Authorization header: `Bearer <token>`
+
+  responses:
+    BadRequest:
+      description: Bad Request - Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized - Invalid or missing token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+          example: Unauthorized
+
+    Profile:
+      type: object
+      description: Profile domain document (read-only)
+      additionalProperties: false
+      required:
+        - _id
+        - name
+      properties:
+        _id:
+          type: string
+          description: MongoDB document ID
+          pattern: '^[0-9a-fA-F]{24}$'
+          example: 507f1f77bcf86cd799439011
+        name:
+          type: string
+          description: Profile name
+          pattern: '^[^\s]{1,40}$'
+          example: my-profile
+        description:
+          type: string
+          description: Profile description
+          pattern: '^[^\t\n]{0,255}$'
+          example: A sample Profile document
+        status:
+          type: string
+          description: Profile status
+          example: active
+
+    Customer:
+      type: object
+      description: Customer domain document (read-only)
+      additionalProperties: false
+      required:
+        - _id
+        - name
+      properties:
+        _id:
+          type: string
+          description: MongoDB document ID
+          pattern: '^[0-9a-fA-F]{24}$'
+          example: 507f1f77bcf86cd799439011
+        name:
+          type: string
+          description: Customer name
+          pattern: '^[^\s]{1,40}$'
+          example: my-customer
+        description:
+          type: string
+          description: Customer description
+          pattern: '^[^\t\n]{0,255}$'
+          example: A sample Customer document
+        status:
+          type: string
+          description: Customer status
+          example: active
