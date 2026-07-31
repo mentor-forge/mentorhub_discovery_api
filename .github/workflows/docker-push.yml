@@ -1,3 +1,13 @@
+# Post-migration container publish — CodeArtifact dependency auth (matches mentorhub_mentee_api).
+#
+# Prerequisites (org-level):
+#   secrets.AWS_ROLE_ARN_READ  →  IAM GitHubActionsCodeArtifactRead (Shared-Services)
+#   vars.AWS_REGION, vars.AWS_SHARED_SERVICES_ACCOUNT_ID, vars.CODEARTIFACT_*
+#
+# This repo MUST appear in that role's OIDC trust policy:
+#   repo:mentor-forge/mentorhub_discovery_api:ref:refs/heads/main
+# See .github/OIDC.md and mentorhub_cloudformation/docs/github-ci.md
+
 name: Build and Push Docker Image
 run-name: ${{ github.actor }} ran Build and Push
 
