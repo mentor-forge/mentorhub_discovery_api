@@ -23,6 +23,21 @@ TYPED_CARD_PATHS = [
     "/api/cards/settings",
 ]
 
+NOTIFICATION_ID = "665f1c2a9b1e4c0a1b2c3d4e"
+
+# Notification control rules (OpenAPI /api/notification paths).
+NOTIFICATION_CONTROL_PATHS = [
+    "/api/notification",
+    "/api/notification/dismiss/<notification_id>",
+    "/api/notification/cancel/<notification_id>",
+]
+
+# The same rules as request URLs, with the id placeholder filled in.
+NOTIFICATION_CONTROL_URLS = [
+    (path, path.replace("<notification_id>", NOTIFICATION_ID))
+    for path in NOTIFICATION_CONTROL_PATHS
+]
+
 
 class TestServerInitialization(unittest.TestCase):
     """Test cases for server initialization."""
@@ -162,11 +177,35 @@ class TestAppConfiguration(unittest.TestCase):
                 response = self.client.get(path)
                 self.assertIn(response.status_code, [200, 401, 500])
 
-    def test_notification_control_routes_not_registered_yet(self):
-        """Notification create / dismiss / cancel land in a follow-up task."""
+    def test_notification_control_routes_registered(self):
+        """Notification create / dismiss / cancel are mounted at /api/notification."""
         rules = [rule.rule for rule in self.app.url_map.iter_rules()]
 
-        self.assertFalse(any(rule.startswith("/api/notification") for rule in rules))
+        for path in NOTIFICATION_CONTROL_PATHS:
+            with self.subTest(path=path):
+                self.assertIn(path, rules)
+
+    def test_notification_control_routes_accept_post(self):
+        """Each control route is a POST route; auth or db failures are fine here."""
+        for path in NOTIFICATION_CONTROL_PATHS:
+            with self.subTest(path=path):
+                rule = next(r for r in self.app.url_map.iter_rules() if r.rule == path)
+                self.assertIn("POST", rule.methods)
+
+    def test_notification_control_routes_require_auth(self):
+        """An unauthenticated control POST is rejected before it reaches the service."""
+        for path, url in NOTIFICATION_CONTROL_URLS:
+            with self.subTest(path=path):
+                response = self.client.post(url, json={})
+                self.assertIn(response.status_code, [401, 500])
+
+    def test_notification_control_does_not_displace_the_card_list(self):
+        """The F050 Card GET list stays mounted alongside the control routes."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        self.assertIn("/api/cards/notifications", rules)
+        response = self.client.get("/api/cards/notifications")
+        self.assertIn(response.status_code, [200, 401, 500])
 
 
 class TestSignalHandlers(unittest.TestCase):

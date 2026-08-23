@@ -2,8 +2,8 @@
 Flask MongoDB API Server
 
 Discovery API for the Mentor Hub system — the composite home Card list, the
-typed `/api/cards/{type}` lists, and the standard config, docs, and metrics
-endpoints. Notification control endpoints land in a follow-up task.
+typed `/api/cards/{type}` lists, the Notification control endpoints, and the
+standard config, docs, and metrics endpoints.
 """
 
 import sys
@@ -51,6 +51,7 @@ from src.routes.card_routes import (
     create_product_cards_get_routes,
     create_settings_cards_get_routes,
 )
+from src.routes.notification_routes import create_notification_routes
 from src.services.notification_service import NotificationCardService
 from src.services.path_service import PathCardService
 from src.services.plan_service import PlanCardService
@@ -100,11 +101,16 @@ app.register_blueprint(
     ),
     url_prefix="/api/cards/notifications",
 )
+
+# Notification control: Discovery owns create, dismiss, and cancel. Bound to
+# NotificationService so mutations return Notification documents, not Cards.
+app.register_blueprint(create_notification_routes(), url_prefix="/api/notification")
 metrics = create_metric_routes(app)  # This exposes /metrics endpoint
 
 logger.info("============= Routes Registered ===============")
 logger.info("  /api/cards - Composite home card list")
 logger.info("  /api/cards/{type} - Typed card lists")
+logger.info("  /api/notification - Notification create, dismiss, cancel")
 logger.info("  /api/config - Configuration endpoint")
 logger.info("  /docs - API Explorer")
 logger.info("  /metrics - Prometheus metrics endpoint")
