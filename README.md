@@ -48,24 +48,25 @@ pipenv run lint
 
 - `src/` - Main package containing:
   - `server.py` - API entrypoint
-  - `routes/` - HTTP request/response handlers (`customer_routes`, `profile_routes`)
-  - `services/` - Local business logic for customer/profile list-get patterns
+  - `routes/` - HTTP request/response handlers
+  - `services/` - Business logic and RBAC for collections this API controls
 
 - `test/` - Test suite with matching directory structure:
   - `routes/` - Route unit tests
   - `services/` - Service unit tests
   - `e2e/` - End-to-end tests flagged with `@pytest.mark.e2e`
 
-## api-utils migration notes (F-W18 bootstrap)
+## api-utils notes
 
-Bootstrapped from `mentorhub_customer_api` with **api-utils 0.2.1 → 0.5.2**.
+This API pins **`api-utils==1.0.0`** from CodeArtifact. In 1.0.0, list GETs return a plain JSON
+**array** and paginate with the `offset` and `size` **request headers** (defaults `0` / `20`, max
+`100`) — there is no cursor envelope and no infinite-scroll helper. MongoDB I/O goes through
+`MongoIO` (`get_document`, `get_documents`, `create_document`, `update_document`,
+`upsert_document`) rather than PyMongo collections.
 
-| Service | Status | Notes |
-|---------|--------|-------|
-| `CustomerService` | **Local** (`src/services/customer_service.py`) | No `api_utils.services.CustomerService` yet; harvest tracked for F-UA08 / F-DA01. Uses `Config.CUSTOMER_COLLECTION_NAME` (no local `_collection_name()` fallback). |
-| `ProfileService` | **Local** (`src/services/profile_service.py`) | Discovery uses infinite-scroll list/get, not the mentor-dashboard `api_utils.services.ProfileService`. Do not swap imports until a shared list/get implementation is harvested (F-UA08). |
-
-Follow-up (F-DA01): dashboard aggregate and notification dismiss routes; ingress (Stripe/Cognito webhooks) moves to Admin API (F-AA01).
+The earlier Customer and Profile infinite-scroll list/get endpoints have been retired. The
+Discovery **Card** and **Notification** endpoints that replace them land in follow-up tasks; today
+this API serves the standard config, docs, and metrics endpoints only.
 
 ## API Endpoints
 

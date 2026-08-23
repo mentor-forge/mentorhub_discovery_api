@@ -96,30 +96,16 @@ class TestAppConfiguration(unittest.TestCase):
         response = self.client.post(_FORBIDDEN_CREDENTIAL_ISSUER_PATH)
         self.assertEqual(response.status_code, 404)
 
-    def test_profile_routes_registered(self):
-        """Test that /api/profile routes are registered."""
-        response = self.client.get("/api/profile")
-        # Should not get 404 (route exists), but may get 401 (auth required)
-        self.assertIn(response.status_code, [200, 401, 500])
-
-    def test_customer_routes_registered(self):
-        """Test that /api/customer routes are registered."""
-        response = self.client.get("/api/customer")
-        # Should not get 404 (route exists), but may get 401 (auth required)
-        self.assertIn(response.status_code, [200, 401, 500])
+    def test_docs_route_registered(self):
+        """Test that the /docs explorer route is registered."""
+        response = self.client.get("/docs/openapi.yaml")
+        self.assertNotEqual(response.status_code, 404)
 
     def test_metrics_route_registered(self):
         """Test that /metrics route is registered."""
         response = self.client.get("/metrics")
         # Should not get 404 (route exists)
         self.assertNotEqual(response.status_code, 404)
-
-    def test_all_blueprints_registered(self):
-        """Test that all expected blueprints are registered."""
-        blueprint_names = [bp.name for bp in self.app.blueprints.values()]
-
-        self.assertIn("profile_routes", blueprint_names)
-        self.assertIn("customer_routes", blueprint_names)
 
     def test_url_map_contains_expected_routes(self):
         """Test that URL map contains all expected route patterns."""
@@ -132,9 +118,14 @@ class TestAppConfiguration(unittest.TestCase):
         self.assertFalse(
             any(_FORBIDDEN_CREDENTIAL_ISSUER_PATH in rule for rule in rules)
         )
-        self.assertTrue(any("/api/profile" in rule for rule in rules))
-        self.assertTrue(any("/api/customer" in rule for rule in rules))
         self.assertTrue(any("/metrics" in rule for rule in rules))
+
+    def test_retired_domain_routes_not_registered(self):
+        """Profile/Customer list-get routes were retired; Card/Notification replace them."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        self.assertFalse(any("/api/profile" in rule for rule in rules))
+        self.assertFalse(any("/api/customer" in rule for rule in rules))
 
 
 class TestSignalHandlers(unittest.TestCase):

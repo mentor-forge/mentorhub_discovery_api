@@ -1,7 +1,8 @@
 """
 Flask MongoDB API Server
 
-Discovery API for the Mentor Hub system — customer and profile list/get endpoints.
+Discovery API for the Mentor Hub system — config, docs, and metrics endpoints.
+Card and Notification domain endpoints land in follow-up tasks.
 """
 
 import sys
@@ -35,21 +36,15 @@ app.json = MongoJSONEncoder(app)
 
 # Route registration (all grouped together)
 from api_utils import create_metric_routes, create_config_routes, create_explorer_routes
-from src.routes.profile_routes import create_profile_routes
-from src.routes.customer_routes import create_customer_routes
 
 # Register route blueprints
 docs_dir = os.path.join(os.path.dirname(__file__), "..", "docs")
 app.register_blueprint(create_explorer_routes(docs_dir), url_prefix="/docs")
 app.register_blueprint(create_config_routes(), url_prefix="/api/config")
-app.register_blueprint(create_profile_routes(), url_prefix="/api/profile")
-app.register_blueprint(create_customer_routes(), url_prefix="/api/customer")
 metrics = create_metric_routes(app)  # This exposes /metrics endpoint
 
 logger.info("============= Routes Registered ===============")
 logger.info("  /api/config - Configuration endpoint")
-logger.info("  /api/profile - Profile domain endpoints")
-logger.info("  /api/customer - Customer domain endpoints")
 logger.info("  /docs - API Explorer")
 logger.info("  /metrics - Prometheus metrics endpoint")
 
