@@ -4,8 +4,26 @@ info:
   description: |
     A Flask + MongoDB API for the Discovery service.
 
-    Card and Notification domain endpoints land in follow-up tasks; this specification
-    currently documents the standard config, docs, and metrics endpoints only.
+    Discovery is the **Card landing API** plus **Notification control**:
+
+    - Every `GET /api/cards*` operation returns a JSON **array** of `Card`. `Card` is a
+      configurator-only projection schema (`Card.yaml`, version `0.0.0.0`) — it is not a persisted
+      MongoDB collection. `GET /api/cards` is the composite home list; each remaining landing-nav
+      item has its own typed list at `GET /api/cards/{type}`.
+    - `Notification` is a persisted collection that Discovery **controls**: create, dismiss, and
+      cancel live under `/api/notification`. Notification reads for the SPA are served as Cards by
+      `GET /api/cards/notifications`.
+
+    Discovery does not expose a Customer or Profile list API.
+
+    ## Pagination
+    List operations paginate with the **request headers** `offset` (default `0`) and `size`
+    (default `20`, maximum `100`). The response body is a bare JSON array — there is no pagination
+    envelope and no pagination response headers.
+
+    ## Filtering and ordering
+    List operations accept `contains` and `in_list` filter query parameters plus `sort_by` and
+    `order`. Allowed values are per-endpoint; an unsupported `sort_by` or `order` returns `400`.
 
     ## Authentication
     All endpoints (except `/metrics`) require JWT authentication via the `Authorization` header:
@@ -15,7 +33,7 @@ info:
 
     For local development, obtain a JWT from the Developer Edition welcome / IdP flow, or use a
     test token from `test/e2e/e2e_auth.py` that matches your `JWT_SECRET` and expected claims.
-  version: 0.1.0
+  version: 0.2.0
   contact:
     name: Mentor Forge
     email: info@agile-learning-institute.com
@@ -27,12 +45,496 @@ servers:
     description: Local development server
 
 tags:
+  - name: Cards
+    description: Landing-page Card lists (JSON arrays of Card)
+  - name: Notification
+    description: Notification control (create, dismiss, cancel)
   - name: Config
     description: Configuration endpoints
   - name: Metrics
     description: Monitoring endpoints
 
 paths:
+  /api/cards:
+    get:
+      tags:
+        - Cards
+      summary: Home cards (composite)
+      description: |
+        Returns the composite home Card list for the caller, assembled in this order:
+
+        1. **Active Notifications** for the token `profile_id` — notifications that have neither a
+           `dismissed` nor a `cancelled` breadcrumb.
+        2. **Members** — Profile Cards scoped by the token `customer_id`, included only when the
+           token roles contain Customer or Coordinator (`Config.ROLE_CUSTOMER`,
+           `Config.ROLE_COORDINATOR`).
+        3. **Mentees** — Profile Cards scoped by the token `mentor_id`, included only when the
+           token roles contain Mentor (`Config.ROLE_MENTOR`).
+
+        `offset` and `size` apply to the combined composite list. This operation paginates only; the
+        typed lists carry the per-type filter and order parameters.
+      operationId: getHomeCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/cards/customer:
+    get:
+      tags:
+        - Cards
+      summary: Customer cards
+      description: |
+        Returns Customer Cards visible to the caller, scoped by outbound RBAC from the token.
+      operationId: getCustomerCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+        - $ref: '#/components/parameters/NameContainsQuery'
+        - name: sort_by
+          in: query
+          required: false
+          description: Field to sort by
+          schema:
+            type: string
+            default: name
+            enum:
+              - name
+        - $ref: '#/components/parameters/OrderAscQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/cards/members:
+    get:
+      tags:
+        - Cards
+      summary: Member cards
+      description: |
+        Returns Profile Cards for the token `customer_id` when the token roles contain Customer or
+        Coordinator (`Config.ROLE_CUSTOMER`, `Config.ROLE_COORDINATOR`). Outbound RBAC hides
+        archived and out-of-scope Profiles, so a caller without those roles receives an empty array
+        rather than an error. Uses the default list pagination headers and query parameters.
+      operationId: getMemberCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+        - $ref: '#/components/parameters/NameContainsQuery'
+        - $ref: '#/components/parameters/FullNameContainsQuery'
+        - $ref: '#/components/parameters/EmailContainsQuery'
+        - $ref: '#/components/parameters/DescriptionContainsQuery'
+        - $ref: '#/components/parameters/StatusInListQuery'
+        - $ref: '#/components/parameters/RolesInListQuery'
+        - $ref: '#/components/parameters/ProfileSortByQuery'
+        - $ref: '#/components/parameters/OrderAscQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/cards/mentees:
+    get:
+      tags:
+        - Cards
+      summary: Mentee cards
+      description: |
+        Returns Profile Cards for the token `mentor_id` when the token roles contain Mentor
+        (`Config.ROLE_MENTOR`). Outbound RBAC hides archived and out-of-scope Profiles, so a caller
+        without that role receives an empty array rather than an error. Uses the default list
+        pagination headers and query parameters.
+      operationId: getMenteeCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+        - $ref: '#/components/parameters/NameContainsQuery'
+        - $ref: '#/components/parameters/FullNameContainsQuery'
+        - $ref: '#/components/parameters/EmailContainsQuery'
+        - $ref: '#/components/parameters/DescriptionContainsQuery'
+        - $ref: '#/components/parameters/StatusInListQuery'
+        - $ref: '#/components/parameters/RolesInListQuery'
+        - $ref: '#/components/parameters/ProfileSortByQuery'
+        - $ref: '#/components/parameters/OrderAscQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/cards/resources:
+    get:
+      tags:
+        - Cards
+      summary: Resource cards
+      description: |
+        Returns Resource Cards visible to the caller, scoped by outbound RBAC from the token.
+      operationId: getResourceCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+        - $ref: '#/components/parameters/NameContainsQuery'
+        - $ref: '#/components/parameters/DescriptionContainsQuery'
+        - name: url
+          in: query
+          required: false
+          description: Case-insensitive `contains` filter on the resource url
+          schema:
+            type: string
+        - $ref: '#/components/parameters/StatusInListQuery'
+        - name: interests
+          in: query
+          required: false
+          description: Comma-separated `in_list` filter on interests
+          schema:
+            type: string
+        - name: technologies
+          in: query
+          required: false
+          description: Comma-separated `in_list` filter on technologies
+          schema:
+            type: string
+        - name: skill_level
+          in: query
+          required: false
+          description: Comma-separated `in_list` filter on skill level
+          schema:
+            type: string
+        - name: sort_by
+          in: query
+          required: false
+          description: Field to sort by
+          schema:
+            type: string
+            default: name
+            enum:
+              - name
+              - description
+              - status
+              - created.at_time
+              - saved.at_time
+        - $ref: '#/components/parameters/OrderAscQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/cards/paths:
+    get:
+      tags:
+        - Cards
+      summary: Path cards
+      description: |
+        Returns Path Cards visible to the caller, scoped by outbound RBAC from the token.
+      operationId: getPathCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+        - $ref: '#/components/parameters/NameContainsQuery'
+        - name: sort_by
+          in: query
+          required: false
+          description: Field to sort by
+          schema:
+            type: string
+            default: name
+            enum:
+              - name
+        - $ref: '#/components/parameters/OrderAscQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/cards/plans:
+    get:
+      tags:
+        - Cards
+      summary: Plan cards
+      description: |
+        Returns Plan Cards visible to the caller, scoped by outbound RBAC from the token.
+      operationId: getPlanCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+        - $ref: '#/components/parameters/NameContainsQuery'
+        - name: sort_by
+          in: query
+          required: false
+          description: Field to sort by
+          schema:
+            type: string
+            default: name
+            enum:
+              - name
+        - $ref: '#/components/parameters/OrderAscQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/cards/products:
+    get:
+      tags:
+        - Cards
+      summary: Product cards
+      description: |
+        Returns Product Cards visible to the caller, scoped by outbound RBAC from the token.
+      operationId: getProductCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+        - $ref: '#/components/parameters/NameContainsQuery'
+        - name: sort_by
+          in: query
+          required: false
+          description: Field to sort by
+          schema:
+            type: string
+            default: name
+            enum:
+              - name
+        - $ref: '#/components/parameters/OrderAscQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/cards/notifications:
+    get:
+      tags:
+        - Cards
+      summary: Notification cards
+      description: |
+        Returns Notification Cards visible to the caller. Outbound RBAC scopes the list to
+        notifications targeting the token `profile_id`, `customer_id`, or `mentor_id`, plus
+        globally scoped notifications, and excludes archived documents. Notifications are ordered
+        newest first by `created.at_time`.
+      operationId: getNotificationCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+        - name: sort_by
+          in: query
+          required: false
+          description: Field to sort by
+          schema:
+            type: string
+            default: created.at_time
+            enum:
+              - created.at_time
+        - name: order
+          in: query
+          required: false
+          description: Sort direction
+          schema:
+            type: string
+            default: desc
+            enum:
+              - asc
+              - desc
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/cards/settings:
+    get:
+      tags:
+        - Cards
+      summary: Settings cards
+      description: |
+        Returns Setting Cards visible to the caller, scoped by outbound RBAC from the token.
+      operationId: getSettingsCards
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OffsetHeader'
+        - $ref: '#/components/parameters/SizeHeader'
+        - $ref: '#/components/parameters/NameContainsQuery'
+        - name: sort_by
+          in: query
+          required: false
+          description: Field to sort by
+          schema:
+            type: string
+            default: name
+            enum:
+              - name
+        - $ref: '#/components/parameters/OrderAscQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/CardArray'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/notification:
+    post:
+      tags:
+        - Notification
+      summary: Create a notification
+      description: |
+        Creates a Notification. Any authenticated caller may create one. The client must not send
+        system-managed fields (`_id`, `created`, `dismissed`, `cancelled`) — they are stripped by
+        the service, and `created` is set from the request breadcrumb. Target scope is expressed by
+        exactly one of `profile_id`, `customer_id`, `mentor_id`, or the `global` breadcrumb.
+      operationId: createNotification
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationCreate'
+      responses:
+        '201':
+          description: Notification created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/notification/dismiss/{notification_id}:
+    post:
+      tags:
+        - Notification
+      summary: Dismiss a notification
+      description: |
+        Sets the `dismissed` breadcrumb on the Notification from the request breadcrumb. `dismissed`
+        is a breadcrumb, not a boolean, and no other field is modified. A dismissed notification is
+        excluded from the composite home list.
+      operationId: dismissNotification
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationIdPath'
+      responses:
+        '200':
+          description: Notification dismissed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/notification/cancel/{notification_id}:
+    post:
+      tags:
+        - Notification
+      summary: Cancel a notification
+      description: |
+        Sets the `cancelled` breadcrumb on the Notification from the request breadcrumb, marking it
+        cancelled or superseded. `cancelled` is a breadcrumb, not a boolean, and no other field is
+        modified. A cancelled notification is excluded from the composite home list.
+      operationId: cancelNotification
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/NotificationIdPath'
+      responses:
+        '200':
+          description: Notification cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/config:
     get:
       tags:
@@ -65,11 +567,7 @@ paths:
                   token:
                     type: object
         '401':
-          description: Unauthorized - Invalid or missing token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/Unauthorized'
 
   /metrics:
     get:
@@ -96,7 +594,115 @@ components:
         JWT issued by your identity provider (Developer Edition welcome flow for local dev).
         Include the token in the Authorization header: `Bearer <token>`
 
+  parameters:
+    OffsetHeader:
+      name: offset
+      in: header
+      required: false
+      description: Zero-based index of the first document to return
+      schema:
+        type: integer
+        format: int32
+        minimum: 0
+        default: 0
+    SizeHeader:
+      name: size
+      in: header
+      required: false
+      description: Number of documents to return
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+    OrderAscQuery:
+      name: order
+      in: query
+      required: false
+      description: Sort direction
+      schema:
+        type: string
+        default: asc
+        enum:
+          - asc
+          - desc
+    NameContainsQuery:
+      name: name
+      in: query
+      required: false
+      description: Case-insensitive `contains` filter on the name
+      schema:
+        type: string
+    FullNameContainsQuery:
+      name: full_name
+      in: query
+      required: false
+      description: Case-insensitive `contains` filter on the full name
+      schema:
+        type: string
+    EmailContainsQuery:
+      name: email
+      in: query
+      required: false
+      description: Case-insensitive `contains` filter on the email address
+      schema:
+        type: string
+    DescriptionContainsQuery:
+      name: description
+      in: query
+      required: false
+      description: Case-insensitive `contains` filter on the description
+      schema:
+        type: string
+    StatusInListQuery:
+      name: status
+      in: query
+      required: false
+      description: Comma-separated `in_list` filter on status
+      schema:
+        type: string
+    RolesInListQuery:
+      name: roles
+      in: query
+      required: false
+      description: Comma-separated `in_list` filter on roles
+      schema:
+        type: string
+    ProfileSortByQuery:
+      name: sort_by
+      in: query
+      required: false
+      description: Field to sort by
+      schema:
+        type: string
+        default: name
+        enum:
+          - name
+          - full_name
+          - email
+          - status
+          - created.at_time
+          - saved.at_time
+    NotificationIdPath:
+      name: notification_id
+      in: path
+      required: true
+      description: MongoDB ObjectId of the Notification
+      schema:
+        type: string
+        pattern: '^[0-9a-fA-F]{24}$'
+        example: 665f1c2a9b1e4c0a1b2c3d4e
+
   responses:
+    CardArray:
+      description: A JSON array of Cards for the requested page
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Card'
     BadRequest:
       description: Bad Request - Invalid request parameters
       content:
@@ -109,8 +715,14 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Forbidden - Caller may not perform this operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     NotFound:
-      description: Resource not found
+      description: Resource not found (or hidden by outbound RBAC)
       content:
         application/json:
           schema:
@@ -132,3 +744,172 @@ components:
           type: string
           description: Error message
           example: Unauthorized
+
+    Breadcrumb:
+      type: object
+      description: Tracking breadcrumb captured from the request
+      additionalProperties: false
+      required:
+        - from_ip
+        - by_user
+        - at_time
+        - correlation_id
+      properties:
+        from_ip:
+          type: string
+          format: ip
+          description: Http Request remote IP address
+        by_user:
+          type: string
+          pattern: '^[^\s]{1,40}$'
+          description: The IdP User Name claimed by the JWT
+        at_time:
+          type: string
+          format: date-time
+          description: The date-time when this breadcrumb was created
+        correlation_id:
+          type: string
+          pattern: '^[^\s]{1,40}$'
+          description: The logging correlation ID of the update transaction
+
+    Card:
+      type: object
+      description: |
+        Discovery landing card. `Card` is a configurator-only projection schema (`Card.yaml`,
+        version `0.0.0.0`) rather than a persisted MongoDB collection: Discovery projects source
+        documents (Notification, Profile, Resource, Path, Plan, and so on) onto this shape. The
+        `type` discriminator names the source collection.
+      additionalProperties: false
+      properties:
+        _id:
+          type: string
+          pattern: '^[0-9a-fA-F]{24}$'
+          description: ID of source document
+          example: 665f1c2a9b1e4c0a1b2c3d4e
+        name:
+          type: string
+          pattern: '^[^\t\n]{0,255}$'
+          description: The card title
+        description:
+          type: string
+          maxLength: 4096
+          description: The card contents
+        link:
+          type: string
+          format: uri
+          description: The url the card links to
+        type:
+          type: string
+          description: The Card Type (Collection Aligned)
+          enum:
+            - Event
+            - Member
+            - Mentee
+            - Notification
+            - Path
+            - Plan
+            - Resource
+
+    Notification:
+      type: object
+      description: |
+        Cross-domain notification for Discovery presentation and dismiss. `dismissed` and
+        `cancelled` are breadcrumbs, not booleans, and there is no `saved` field. Target scope is a
+        single `profile_id`, `customer_id`, or `mentor_id`, or the `global` breadcrumb.
+      additionalProperties: false
+      properties:
+        _id:
+          type: string
+          pattern: '^[0-9a-fA-F]{24}$'
+          description: The unique identifier for the Notification.
+          example: 665f1c2a9b1e4c0a1b2c3d4e
+        name:
+          type: string
+          pattern: '^[^\s]{1,40}$'
+          description: Searchable / display title for the notification
+        message:
+          type: string
+          pattern: '^[^\t\n]{0,255}$'
+          description: User-facing notification body text
+        profile_id:
+          type: string
+          pattern: '^[0-9a-fA-F]{24}$'
+          description: Profile-scoped target (omit for customer/mentor/global scope)
+        customer_id:
+          type: string
+          pattern: '^[0-9a-fA-F]{24}$'
+          description: Customer-scoped target (omit for profile/mentor/global scope)
+        mentor_id:
+          type: string
+          pattern: '^[0-9a-fA-F]{24}$'
+          description: Mentor-scoped target (omit for profile/customer/global scope)
+        global:
+          allOf:
+            - $ref: '#/components/schemas/Breadcrumb'
+          description: >-
+            Global scope published-at breadcrumb (omit when targeting an entity id)
+        status:
+          type: string
+          description: Soft-delete status (active / archived); distinct from dismissed / cancelled
+          enum:
+            - active
+            - archived
+        link_metadata:
+          type: object
+          description: Optional cross-SPA route metadata (F-US09); additional properties allowed
+          additionalProperties: true
+        created:
+          allOf:
+            - $ref: '#/components/schemas/Breadcrumb'
+          description: The tracking breadcrumb for when the Notification was created.
+        dismissed:
+          allOf:
+            - $ref: '#/components/schemas/Breadcrumb'
+          description: Breadcrumb set when the user dismisses the notification
+        cancelled:
+          allOf:
+            - $ref: '#/components/schemas/Breadcrumb'
+          description: Breadcrumb set when the notification is cancelled or superseded
+
+    NotificationCreate:
+      type: object
+      description: |
+        Client-writable subset of `Notification`. The system-managed `_id`, `created`, `dismissed`,
+        and `cancelled` fields are stripped from the request and must not be sent.
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          pattern: '^[^\s]{1,40}$'
+          description: Searchable / display title for the notification
+        message:
+          type: string
+          pattern: '^[^\t\n]{0,255}$'
+          description: User-facing notification body text
+        profile_id:
+          type: string
+          pattern: '^[0-9a-fA-F]{24}$'
+          description: Profile-scoped target (omit for customer/mentor/global scope)
+        customer_id:
+          type: string
+          pattern: '^[0-9a-fA-F]{24}$'
+          description: Customer-scoped target (omit for profile/mentor/global scope)
+        mentor_id:
+          type: string
+          pattern: '^[0-9a-fA-F]{24}$'
+          description: Mentor-scoped target (omit for profile/customer/global scope)
+        global:
+          allOf:
+            - $ref: '#/components/schemas/Breadcrumb'
+          description: >-
+            Global scope published-at breadcrumb (omit when targeting an entity id)
+        status:
+          type: string
+          description: Soft-delete status (active / archived); distinct from dismissed / cancelled
+          enum:
+            - active
+            - archived
+        link_metadata:
+          type: object
+          description: Optional cross-SPA route metadata (F-US09); additional properties allowed
+          additionalProperties: true
