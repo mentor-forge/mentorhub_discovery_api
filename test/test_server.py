@@ -91,6 +91,12 @@ class TestAppConfiguration(unittest.TestCase):
         # Should not get 404 (route exists), but may get 401 (auth required)
         self.assertIn(response.status_code, [200, 401, 500])
 
+    def test_cards_route_registered(self):
+        """Test that /api/cards route is registered."""
+        response = self.client.get("/api/cards")
+        # Should not get 404 (route exists), but may get 401 (auth required)
+        self.assertIn(response.status_code, [200, 401, 500])
+
     def test_credential_issuing_route_not_registered(self):
         """Domain APIs must not register HTTP routes that mint credentials."""
         response = self.client.post(_FORBIDDEN_CREDENTIAL_ISSUER_PATH)
@@ -115,6 +121,7 @@ class TestAppConfiguration(unittest.TestCase):
         # Check for key routes
         self.assertTrue(any("/docs" in rule for rule in rules))
         self.assertTrue(any("/api/config" in rule for rule in rules))
+        self.assertIn("/api/cards", rules)
         self.assertFalse(
             any(_FORBIDDEN_CREDENTIAL_ISSUER_PATH in rule for rule in rules)
         )
@@ -126,6 +133,13 @@ class TestAppConfiguration(unittest.TestCase):
 
         self.assertFalse(any("/api/profile" in rule for rule in rules))
         self.assertFalse(any("/api/customer" in rule for rule in rules))
+
+    def test_typed_card_routes_not_registered_yet(self):
+        """Only the composite home list ships here; typed card lists come later."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+        card_rules = [rule for rule in rules if rule.startswith("/api/cards")]
+
+        self.assertEqual(card_rules, ["/api/cards"])
 
 
 class TestSignalHandlers(unittest.TestCase):
