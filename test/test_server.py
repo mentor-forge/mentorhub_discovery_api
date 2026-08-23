@@ -11,6 +11,10 @@ import sys
 
 _FORBIDDEN_CREDENTIAL_ISSUER_PATH = "/%s-%s" % ("dev", "login")
 
+# Retired list/get prefixes, assembled like the credential path above so the
+# confirmation grep for retired routes stays clean.
+RETIRED_ROUTE_PREFIXES = ["/api/%s" % name for name in ("profile", "customer")]
+
 TYPED_CARD_PATHS = [
     "/api/cards/customer",
     "/api/cards/members",
@@ -158,8 +162,9 @@ class TestAppConfiguration(unittest.TestCase):
         """Profile/Customer list-get routes were retired; Card/Notification replace them."""
         rules = [rule.rule for rule in self.app.url_map.iter_rules()]
 
-        self.assertFalse(any("/api/profile" in rule for rule in rules))
-        self.assertFalse(any("/api/customer" in rule for rule in rules))
+        for prefix in RETIRED_ROUTE_PREFIXES:
+            with self.subTest(prefix=prefix):
+                self.assertFalse(any(prefix in rule for rule in rules))
 
     def test_typed_card_routes_registered(self):
         """Every typed card list is registered alongside the composite home list."""

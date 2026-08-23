@@ -3,8 +3,10 @@ E2E tests for the Card endpoints (consume-style, read-only).
 
 These tests verify the GET /api/cards endpoints against a running server by
 making actual HTTP requests. An empty array is a valid Card list, so the
-assertions cover the contract — status, array body, Card shape — and the one
-test that needs seeded documents skips when the persona has none.
+assertions cover the contract — status, array body, Card shape. The two
+identity-scoped lists (Member, Mentee) borrow the same signing settings with
+claim overrides so their projection is exercised too; a projection test still
+skips if the persona has no seeded documents behind it.
 
 To run these tests:
 1. Start the server: pipenv run dev (or pipenv run api for containerized)
@@ -57,6 +59,14 @@ UNTYPED_CARD_PATHS = {
     "/api/cards/settings",
 }
 
+# The Member list is the token `customer_id` scope and the Mentee list is the
+# token `mentor_id` scope, so those two paths need a persona that owns some.
+# Both values are seeded Developer Edition ids (Profile.0.1.0.0 test data).
+SCOPED_CARD_CLAIMS = {
+    "/api/cards/members": {"customer_id": "D00000000000000000000002"},
+    "/api/cards/mentees": {"mentor_id": "A00000000000000000000010"},
+}
+
 # Path segment -> Card `type` the list projects.
 TYPED_CARD_TYPES = {
     "/api/cards/members": "Member",
@@ -78,6 +88,12 @@ def _auth_headers(token=None, **extra):
     headers = {"Authorization": f"Bearer {token or get_auth_token()}"}
     headers.update(extra)
     return headers
+
+
+def _scoped_token(path):
+    """Token carrying the identity claim a typed list scopes on, if it needs one."""
+    claims = SCOPED_CARD_CLAIMS.get(path)
+    return get_auth_token(**claims) if claims else None
 
 
 def _assert_card_shape(cards):
@@ -170,7 +186,9 @@ def test_typed_card_list_requires_auth(path):
 @pytest.mark.parametrize("path,card_type", sorted(TYPED_CARD_TYPES.items()))
 def test_typed_card_list_projects_its_card_type(path, card_type):
     """Test a typed list stamps every card with its own Card type."""
-    response = requests.get(f"{BASE_URL}{path}", headers=_auth_headers())
+    response = requests.get(
+        f"{BASE_URL}{path}", headers=_auth_headers(_scoped_token(path))
+    )
     assert response.status_code == 200, _err(response, 200)
 
     cards = response.json()
