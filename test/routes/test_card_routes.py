@@ -8,6 +8,8 @@ the token/breadcrumb helpers are mocked, so no database or JWT is required.
 Typed lists come from two places — the local Customer / Product / Setting
 blueprints in `card_routes`, and the shared `create_*_get_routes` factories
 bound to the Card-projecting service subclasses — so both are mounted here.
+Several shared factories also mount a GET by-id rule the Card contract does not
+include, so `register_list_only_blueprint` is covered here too.
 """
 
 import unittest
@@ -30,6 +32,7 @@ from src.routes.card_routes import (
     create_customer_cards_get_routes,
     create_product_cards_get_routes,
     create_settings_cards_get_routes,
+    register_list_only_blueprint,
 )
 from src.services.notification_service import NotificationCardService
 from src.services.path_service import PathCardService
@@ -191,6 +194,16 @@ SHARED_TYPED_LISTS = [
         "get_notifications",
     ),
 ]
+
+# The shared factories above that also mount a GET by-id rule, which Discovery
+# suppresses: (path segment, factory, service class).
+BY_ID_SHARED_TYPED_LISTS = [
+    (segment, factory, service_cls)
+    for segment, factory, service_cls, _ in SHARED_TYPED_LISTS
+    if segment != "notifications"
+]
+
+CARD_ID = "665f1c2a9b1e4c0a1b2c3d21"
 
 
 class TestLocalTypedCardLists(unittest.TestCase):
@@ -403,6 +416,85 @@ class TestSharedFactoryTypedCardLists(unittest.TestCase):
 
                 self.assertEqual(response.status_code, 400)
                 mock_list.assert_not_called()
+
+
+class TestListOnlyBlueprintRegistration(unittest.TestCase):
+    """A shared GET factory mounts its list rule only, never its by-id rule."""
+
+    def _register(self, factory, service_cls, segment):
+        app = Flask(__name__)
+        register_list_only_blueprint(
+            app,
+            factory(service_cls, name=f"{segment}_card_routes"),
+            f"/api/cards/{segment}",
+        )
+        return app
+
+    def test_mounts_the_list_rule(self):
+        for segment, factory, service_cls in BY_ID_SHARED_TYPED_LISTS:
+            with self.subTest(segment=segment):
+                app = self._register(factory, service_cls, segment)
+
+                rules = [rule.rule for rule in app.url_map.iter_rules()]
+                self.assertIn(f"/api/cards/{segment}", rules)
+
+    def test_drops_the_by_id_rule(self):
+        for segment, factory, service_cls in BY_ID_SHARED_TYPED_LISTS:
+            with self.subTest(segment=segment):
+                app = self._register(factory, service_cls, segment)
+
+                rules = [rule.rule for rule in app.url_map.iter_rules()]
+                self.assertFalse(
+                    any(rule.startswith(f"/api/cards/{segment}/") for rule in rules),
+                    f"by-id rule survived for {segment}: {rules}",
+                )
+
+    def test_drops_the_by_id_view_function(self):
+        for segment, factory, service_cls in BY_ID_SHARED_TYPED_LISTS:
+            with self.subTest(segment=segment):
+                app = self._register(factory, service_cls, segment)
+
+                endpoints = [
+                    endpoint
+                    for endpoint in app.view_functions
+                    if endpoint.startswith(f"{segment}_card_routes.")
+                ]
+                self.assertEqual(len(endpoints), 1, f"Unexpected views: {endpoints}")
+
+    def test_a_by_id_request_is_404(self):
+        for segment, factory, service_cls in BY_ID_SHARED_TYPED_LISTS:
+            with self.subTest(segment=segment):
+                client = self._register(factory, service_cls, segment).test_client()
+
+                response = client.get(f"/api/cards/{segment}/{CARD_ID}")
+
+                self.assertEqual(response.status_code, 404)
+
+    def test_leaves_a_list_only_blueprint_intact(self):
+        app = Flask(__name__)
+        register_list_only_blueprint(
+            app,
+            create_notification_get_routes(
+                NotificationCardService, name="notification_card_routes"
+            ),
+            "/api/cards/notifications",
+        )
+
+        rules = [rule.rule for rule in app.url_map.iter_rules()]
+        self.assertIn("/api/cards/notifications", rules)
+
+    def test_restores_add_url_rule_for_later_registrations(self):
+        app = self._register(
+            create_resource_get_routes, ResourceCardService, "resources"
+        )
+
+        app.register_blueprint(
+            create_resource_get_routes(ResourceCardService, name="plain_routes"),
+            url_prefix="/plain",
+        )
+
+        rules = [rule.rule for rule in app.url_map.iter_rules()]
+        self.assertIn("/plain/<resource_id>", rules)
 
 
 if __name__ == "__main__":

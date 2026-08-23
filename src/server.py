@@ -50,6 +50,7 @@ from src.routes.card_routes import (
     create_customer_cards_get_routes,
     create_product_cards_get_routes,
     create_settings_cards_get_routes,
+    register_list_only_blueprint,
 )
 from src.routes.notification_routes import create_notification_routes
 from src.services.notification_service import NotificationCardService
@@ -75,25 +76,33 @@ app.register_blueprint(
 app.register_blueprint(
     create_settings_cards_get_routes(), url_prefix="/api/cards/settings"
 )
-app.register_blueprint(
+
+# The shared factories below also mount a GET by-id rule. The Card contract is
+# list-only, so they register through the helper that keeps just the list rule.
+register_list_only_blueprint(
+    app,
     create_resource_get_routes(ResourceCardService, name="resource_card_routes"),
-    url_prefix="/api/cards/resources",
+    "/api/cards/resources",
 )
-app.register_blueprint(
+register_list_only_blueprint(
+    app,
     create_path_get_routes(PathCardService, name="path_card_routes"),
-    url_prefix="/api/cards/paths",
+    "/api/cards/paths",
 )
-app.register_blueprint(
+register_list_only_blueprint(
+    app,
     create_plan_get_routes(PlanCardService, name="plan_card_routes"),
-    url_prefix="/api/cards/plans",
+    "/api/cards/plans",
 )
-app.register_blueprint(
+register_list_only_blueprint(
+    app,
     create_profile_get_routes(MemberCardService, name="member_card_routes"),
-    url_prefix="/api/cards/members",
+    "/api/cards/members",
 )
-app.register_blueprint(
+register_list_only_blueprint(
+    app,
     create_profile_get_routes(MenteeCardService, name="mentee_card_routes"),
-    url_prefix="/api/cards/mentees",
+    "/api/cards/mentees",
 )
 app.register_blueprint(
     create_notification_get_routes(

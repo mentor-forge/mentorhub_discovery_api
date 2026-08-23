@@ -207,12 +207,6 @@ class MemberCardService(ProfileService):
         )
         return _member_cards(profiles)
 
-    @classmethod
-    def get_profile(cls, profile_id, token, breadcrumb):
-        """Get a single visible Profile as a Member Card."""
-        profile = super().get_profile(profile_id, token, breadcrumb)
-        return _member_cards([profile])[0]
-
 
 class MenteeCardService(ProfileService):
     """
@@ -237,9 +231,3 @@ class MenteeCardService(ProfileService):
             token, breadcrumb, offset, size, filters, sort_by
         )
         return _mentee_cards(profiles)
-
-    @classmethod
-    def get_profile(cls, profile_id, token, breadcrumb):
-        """Get a single visible Profile as a Mentee Card."""
-        profile = super().get_profile(profile_id, token, breadcrumb)
-        return _mentee_cards([profile])[0]

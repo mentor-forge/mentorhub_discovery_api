@@ -88,11 +88,8 @@ See the [Open API Specifications](./docs/openapi.yaml) for details on the API.
 | `GET /api/config` | Configuration endpoint |
 
 Card lists return a bare JSON array and paginate with the `offset` and `size` request headers. The
-Notification control endpoints return Notification documents, not Cards.
-
-The shared `api-utils` GET factories also mount by-id GETs under some typed prefixes (for example
-`/api/cards/resources/{id}`). Those are a side effect of the shared factories, are not part of the
-documented Discovery contract, and are not in `docs/openapi.yaml`.
+Notification control endpoints return Notification documents, not Cards. There is no Card by-id GET:
+the Card surface is list-only, so a request such as `/api/cards/resources/{id}` returns 404.
 
 For E2E, mint a Bearer token via `test/e2e/e2e_auth.py` (`get_auth_token()`) with `pipenv run dev` (matching `JWT_SECRET`).
 

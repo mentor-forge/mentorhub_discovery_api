@@ -39,9 +39,3 @@ class ResourceCardService(ResourceService):
             token, breadcrumb, offset, size, filters, sort_by
         )
         return CardService.project_all(CARD_TYPE_RESOURCES, resources)
-
-    @classmethod
-    def get_resource(cls, resource_id, token, breadcrumb):
-        """Get a single visible Resource as a Card."""
-        resource = super().get_resource(resource_id, token, breadcrumb)
-        return CardService.project(CARD_TYPE_RESOURCES, resource)

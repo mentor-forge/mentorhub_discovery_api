@@ -495,37 +495,14 @@ CARD_SUBCLASS_LISTS = [
     ),
 ]
 
-CARD_SUBCLASS_GETTERS = [
-    (
-        ResourceCardService,
-        "get_resource",
-        "api_utils.services.resource_service.ResourceService.get_resource",
-        "Resource",
-    ),
-    (
-        PathCardService,
-        "get_path",
-        "api_utils.services.path_service.PathService.get_path",
-        "Path",
-    ),
-    (
-        PlanCardService,
-        "get_plan",
-        "api_utils.services.plan_service.PlanService.get_plan",
-        "Plan",
-    ),
-    (
-        MemberCardService,
-        "get_profile",
-        "api_utils.services.profile_service.ProfileService.get_profile",
-        "Member",
-    ),
-    (
-        MenteeCardService,
-        "get_profile",
-        "api_utils.services.profile_service.ProfileService.get_profile",
-        "Mentee",
-    ),
+
+# (Card subclass, inherited by-id read the suppressed routes used to call).
+CARD_SUBCLASS_BY_ID_GETTERS = [
+    (ResourceCardService, "get_resource"),
+    (PathCardService, "get_path"),
+    (PlanCardService, "get_plan"),
+    (MemberCardService, "get_profile"),
+    (MenteeCardService, "get_profile"),
 ]
 
 
@@ -556,15 +533,11 @@ class TestCardProjectingSubclasses(unittest.TestCase):
                 args, _ = mock_source.call_args
                 self.assertEqual(args[-4:], (5, 10, {"name": "a"}, sort_by))
 
-    def test_getters_project_a_single_document(self):
-        for service_cls, method, source, card_type in CARD_SUBCLASS_GETTERS:
+    def test_subclasses_do_not_project_a_single_document(self):
+        """Card by-id GETs are suppressed, so no subclass overrides a by-id read."""
+        for service_cls, getter in CARD_SUBCLASS_BY_ID_GETTERS:
             with self.subTest(service=service_cls.__name__):
-                document = {"_id": ObjectId(), "name": "One"}
-                with patch(source, return_value=document):
-                    card = getattr(service_cls, method)("an-id", token(), BREADCRUMB)
-
-                self.assertEqual(card["type"], card_type)
-                self.assertTrue(set(card).issubset(CARD_PROPERTIES))
+                self.assertNotIn(getter, vars(service_cls))
 
 
 class TestNotificationCardIsolation(unittest.TestCase):

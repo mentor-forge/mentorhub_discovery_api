@@ -52,6 +52,19 @@ TYPED_CARD_PATHS = [
     "/api/cards/settings",
 ]
 
+# Typed lists whose shared api-utils GET factory also mounts a GET by-id rule.
+# The Card contract is list-only, so those URLs must not be routed.
+LIST_ONLY_SHARED_CARD_PATHS = [
+    "/api/cards/members",
+    "/api/cards/mentees",
+    "/api/cards/paths",
+    "/api/cards/plans",
+    "/api/cards/resources",
+]
+
+# Well-formed ObjectId; the URL is unrouted, so it never reaches a query.
+CARD_ID = "665f1c2a9b1e4c0a1b2c3d21"
+
 # Typed lists whose source has no Card `type` enum value.
 UNTYPED_CARD_PATHS = {
     "/api/cards/customer",
@@ -180,6 +193,22 @@ def test_typed_card_list_requires_auth(path):
     """Test each typed card list rejects an unauthenticated request."""
     response = requests.get(f"{BASE_URL}{path}")
     assert response.status_code == 401, _err(response, 401)
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("path", LIST_ONLY_SHARED_CARD_PATHS)
+def test_typed_card_by_id_is_not_routed(path):
+    """Test a by-id Card URL 404s for an authenticated caller."""
+    response = requests.get(f"{BASE_URL}{path}/{CARD_ID}", headers=_auth_headers())
+    assert response.status_code == 404, _err(response, 404)
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("path", LIST_ONLY_SHARED_CARD_PATHS)
+def test_typed_card_by_id_is_not_routed_without_auth(path):
+    """Test a by-id Card URL 404s before auth runs, so it never returns 401."""
+    response = requests.get(f"{BASE_URL}{path}/{CARD_ID}")
+    assert response.status_code == 404, _err(response, 404)
 
 
 @pytest.mark.e2e

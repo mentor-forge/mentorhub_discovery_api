@@ -37,9 +37,3 @@ class PlanCardService(PlanService):
         """Get the visible Plans as Cards."""
         plans = super().get_plans(token, breadcrumb, offset, size, filters, sort_by)
         return CardService.project_all(CARD_TYPE_PLANS, plans)
-
-    @classmethod
-    def get_plan(cls, plan_id, token, breadcrumb):
-        """Get a single visible Plan as a Card."""
-        plan = super().get_plan(plan_id, token, breadcrumb)
-        return CardService.project(CARD_TYPE_PLANS, plan)

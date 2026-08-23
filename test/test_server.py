@@ -27,6 +27,18 @@ TYPED_CARD_PATHS = [
     "/api/cards/settings",
 ]
 
+# Typed lists whose shared api-utils GET factory also mounts a GET by-id rule.
+# Discovery's Card contract is list-only, so those rules must be suppressed.
+LIST_ONLY_SHARED_CARD_PATHS = [
+    "/api/cards/members",
+    "/api/cards/mentees",
+    "/api/cards/paths",
+    "/api/cards/plans",
+    "/api/cards/resources",
+]
+
+CARD_ID = "665f1c2a9b1e4c0a1b2c3d21"
+
 NOTIFICATION_ID = "665f1c2a9b1e4c0a1b2c3d4e"
 
 # Notification control rules (OpenAPI /api/notification paths).
@@ -181,6 +193,24 @@ class TestAppConfiguration(unittest.TestCase):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertIn(response.status_code, [200, 401, 500])
+
+    def test_typed_card_by_id_routes_not_registered(self):
+        """The by-id rules the shared GET factories add are stripped off."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        for path in LIST_ONLY_SHARED_CARD_PATHS:
+            with self.subTest(path=path):
+                self.assertFalse(
+                    any(rule.startswith(f"{path}/") for rule in rules),
+                    f"{path} must not carry a by-id rule",
+                )
+
+    def test_typed_card_by_id_urls_return_404(self):
+        """A by-id Card URL is unrouted, so it 404s before auth runs."""
+        for path in LIST_ONLY_SHARED_CARD_PATHS:
+            with self.subTest(path=path):
+                response = self.client.get(f"{path}/{CARD_ID}")
+                self.assertEqual(response.status_code, 404)
 
     def test_notification_control_routes_registered(self):
         """Notification create / dismiss / cancel are mounted at /api/notification."""
