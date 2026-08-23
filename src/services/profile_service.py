@@ -1,149 +1,233 @@
 """
-Profile service for business logic and RBAC.
+Discovery Profile service.
 
-Handles RBAC checks and MongoDB operations for Profile domain.
+Discovery **consumes** Profile: the shared consume surface (get-by-token,
+get-by-id, paginated list) is inherited unchanged. The Discovery-only additions
+are the identity-scoped Member and Mentee lists that back the Card endpoints,
+plus the two Card-projecting subclasses the typed Card routes bind to.
 """
 
-from api_utils import MongoIO, Config
-from api_utils.flask_utils.exceptions import (
-    HTTPBadRequest,
-    HTTPForbidden,
-    HTTPNotFound,
-    HTTPInternalServerError,
-)
-from api_utils.mongo_utils import execute_infinite_scroll_query
 import logging
+
+from api_utils import Config
+from api_utils.mongo_utils import encode_document
+from api_utils.mongo_utils.list_query import (
+    DEFAULT_OFFSET,
+    DEFAULT_SIZE,
+    and_match,
+    build_match_filter,
+    build_sort_by,
+    execute_list_query,
+)
+from api_utils.services import ProfileService as SharedProfileService
+from api_utils.services.profile_service import (
+    DATE_PROPERTIES,
+    ID_PROPERTIES,
+    PROFILE_LIST_FILTERS,
+    PROFILE_LIST_ORDER,
+)
 
 logger = logging.getLogger(__name__)
 
-# Allowed sort fields for Profile domain
-ALLOWED_SORT_FIELDS = ["name", "description"]
+
+# `card_service` imports this module to assemble the composite home list, so the
+# two helpers below import CardService at call time rather than at module scope.
 
 
-class ProfileService:
+def _member_cards(profiles):
+    """Project Profile documents onto Member Cards."""
+    from src.services.card_service import CARD_TYPE_MEMBERS, CardService
+
+    return CardService.project_all(CARD_TYPE_MEMBERS, profiles)
+
+
+def _mentee_cards(profiles):
+    """Project Profile documents onto Mentee Cards."""
+    from src.services.card_service import CARD_TYPE_MENTEES, CardService
+
+    return CardService.project_all(CARD_TYPE_MENTEES, profiles)
+
+
+class ProfileService(SharedProfileService):
     """
-    Service class for Profile domain operations.
+    Discovery subclass of the shared Profile service (consume only).
 
-    Handles:
-    - RBAC authorization checks (placeholder for future implementation)
-    - MongoDB operations via MongoIO singleton
-    - Business logic for Profile domain (read-only)
+    Adds the two token-scoped lists the Card layer projects onto Member and
+    Mentee cards. Both AND their identity scope onto the shared outbound match,
+    so an out-of-scope or archived Profile stays hidden.
     """
 
-    @staticmethod
-    def _check_permission(token, operation):
-        """
-        Check if the user has permission to perform an operation.
-
-        Args:
-            token: Token dictionary with user_id and roles
-            operation: The operation being performed (e.g., 'read')
-
-        Raises:
-            HTTPForbidden: If user doesn't have required permission
-
-        Note: This is a placeholder for future RBAC implementation.
-        For now, all operations require a valid token (authentication only).
-
-        Example RBAC implementation:
-            if operation == 'read':
-                # Read requires any authenticated user (no additional check needed)
-                # For stricter requirements, you could require specific roles:
-                # if not any(role in token.get('roles', []) for role in ['staff', 'admin', 'viewer']):
-                #     raise HTTPForbidden("Insufficient permissions to read profile documents")
-                pass
-        """
-        pass
-
-    @staticmethod
-    def get_profiles(
+    @classmethod
+    def _scoped_profiles(
+        cls,
         token,
         breadcrumb,
-        name=None,
-        after_id=None,
-        limit=10,
-        sort_by="name",
-        order="asc",
+        scope_field,
+        scope_value,
+        offset,
+        size,
+        filters,
+        sort_by,
+    ):
+        """Run the shared Profile list with an extra identity scope AND'd on."""
+        cls._check_permission(token, "read")
+
+        if not scope_value:
+            return []
+
+        scope = {scope_field: scope_value}
+        encode_document(scope, ID_PROPERTIES, DATE_PROPERTIES)
+
+        match = and_match(
+            build_match_filter(
+                cls._outbound_match(token), filters or {}, PROFILE_LIST_FILTERS
+            ),
+            scope,
+        )
+        if sort_by is None:
+            default = PROFILE_LIST_ORDER["default"]
+            sort_by = build_sort_by(
+                default["field"], default["order"], PROFILE_LIST_ORDER
+            )
+
+        config = Config.get_instance()
+        profiles = execute_list_query(
+            config.PROFILE_COLLECTION_NAME,
+            match=match,
+            sort_by=sort_by,
+            offset=offset,
+            size=size,
+        )
+
+        logger.info(
+            f"Retrieved {len(profiles)} profiles scoped by {scope_field} "
+            f"for user {token.get('user_id')}"
+        )
+        return profiles
+
+    @classmethod
+    def get_member_profiles(
+        cls,
+        token,
+        breadcrumb,
+        offset=DEFAULT_OFFSET,
+        size=DEFAULT_SIZE,
+        filters=None,
+        sort_by=None,
     ):
         """
-        Get infinite scroll batch of sorted, filtered profile documents.
+        Get the Profiles belonging to the token `customer_id`.
+
+        Returns an empty list when the token carries no `customer_id`. Role
+        gating for the composite home list lives on CardService.
 
         Args:
             token: Authentication token
             breadcrumb: Audit breadcrumb
-            name: Optional name filter (simple search)
-            after_id: Cursor (ID of last item from previous batch, None for first request)
-            limit: Items per batch
-            sort_by: Field to sort by
-            order: Sort order ('asc' or 'desc')
+            offset: Zero-based start index
+            size: Number of documents to return
+            filters: Parsed filter dict from parse_filter_params
+            sort_by: PyMongo sort list from build_sort_by; default name asc
 
         Returns:
-            dict: {
-                'items': [...],
-                'limit': int,
-                'has_more': bool,
-                'next_cursor': str|None  # ID of last item, or None if no more
-            }
-
-        Raises:
-            HTTPBadRequest: If invalid parameters provided
+            list: Profile documents for the caller's customer
         """
-        try:
-            ProfileService._check_permission(token, "read")
-            mongo = MongoIO.get_instance()
-            config = Config.get_instance()
-            collection = mongo.get_collection(config.PROFILE_COLLECTION_NAME)
-            result = execute_infinite_scroll_query(
-                collection,
-                name=name,
-                after_id=after_id,
-                limit=limit,
-                sort_by=sort_by,
-                order=order,
-                allowed_sort_fields=ALLOWED_SORT_FIELDS,
-            )
-            logger.info(
-                f"Retrieved {len(result['items'])} profiles (has_more={result['has_more']}) "
-                f"for user {token.get('user_id')}"
-            )
-            return result
-        except HTTPBadRequest:
-            raise
-        except Exception as e:
-            logger.error(f"Error retrieving profiles: {str(e)}")
-            raise HTTPInternalServerError("Failed to retrieve profiles")
+        return cls._scoped_profiles(
+            token,
+            breadcrumb,
+            "customer_id",
+            token.get("customer_id"),
+            offset,
+            size,
+            filters,
+            sort_by,
+        )
 
-    @staticmethod
-    def get_profile(profile_id, token, breadcrumb):
+    @classmethod
+    def get_mentee_profiles(
+        cls,
+        token,
+        breadcrumb,
+        offset=DEFAULT_OFFSET,
+        size=DEFAULT_SIZE,
+        filters=None,
+        sort_by=None,
+    ):
         """
-        Retrieve a specific profile document by ID.
+        Get the Profiles mentored by the token `mentor_id`.
+
+        Returns an empty list when the token carries no `mentor_id`. Role
+        gating for the composite home list lives on CardService.
 
         Args:
-            profile_id: The profile ID to retrieve
-            token: Token dictionary with user_id and roles
-            breadcrumb: Breadcrumb dictionary for logging
+            token: Authentication token
+            breadcrumb: Audit breadcrumb
+            offset: Zero-based start index
+            size: Number of documents to return
+            filters: Parsed filter dict from parse_filter_params
+            sort_by: PyMongo sort list from build_sort_by; default name asc
 
         Returns:
-            dict: The profile document
-
-        Raises:
-            HTTPNotFound: If profile is not found
+            list: Profile documents for the caller's mentees
         """
-        try:
-            ProfileService._check_permission(token, "read")
+        return cls._scoped_profiles(
+            token,
+            breadcrumb,
+            "mentor_id",
+            token.get("mentor_id"),
+            offset,
+            size,
+            filters,
+            sort_by,
+        )
 
-            mongo = MongoIO.get_instance()
-            config = Config.get_instance()
-            profile = mongo.get_document(config.PROFILE_COLLECTION_NAME, profile_id)
-            if profile is None:
-                raise HTTPNotFound(f"Profile { profile_id} not found")
 
-            logger.info(
-                f"Retrieved profile { profile_id} for user {token.get('user_id')}"
-            )
-            return profile
-        except HTTPNotFound:
-            raise
-        except Exception as e:
-            logger.error(f"Error retrieving profile { profile_id}: {str(e)}")
-            raise HTTPInternalServerError(f"Failed to retrieve profile { profile_id}")
+class MemberCardService(ProfileService):
+    """
+    Member view of Profile projected onto the Card schema.
+
+    Bound to `create_profile_get_routes` for `/api/cards/members`. The list is
+    the token `customer_id` scope, which is narrower than the shared Profile
+    list, so it delegates to `get_member_profiles` rather than to `super()`.
+    """
+
+    @classmethod
+    def get_profiles(
+        cls,
+        token,
+        breadcrumb,
+        offset=DEFAULT_OFFSET,
+        size=DEFAULT_SIZE,
+        filters=None,
+        sort_by=None,
+    ):
+        """Get the caller's org members as Cards."""
+        profiles = cls.get_member_profiles(
+            token, breadcrumb, offset, size, filters, sort_by
+        )
+        return _member_cards(profiles)
+
+
+class MenteeCardService(ProfileService):
+    """
+    Mentee view of Profile projected onto the Card schema.
+
+    Bound to `create_profile_get_routes` for `/api/cards/mentees`. The list is
+    the token `mentor_id` scope, so it delegates to `get_mentee_profiles`.
+    """
+
+    @classmethod
+    def get_profiles(
+        cls,
+        token,
+        breadcrumb,
+        offset=DEFAULT_OFFSET,
+        size=DEFAULT_SIZE,
+        filters=None,
+        sort_by=None,
+    ):
+        """Get the caller's mentees as Cards."""
+        profiles = cls.get_mentee_profiles(
+            token, breadcrumb, offset, size, filters, sort_by
+        )
+        return _mentee_cards(profiles)

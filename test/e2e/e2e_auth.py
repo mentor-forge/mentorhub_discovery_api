@@ -21,9 +21,19 @@ _DEFAULT_JWT_ALGORITHM = "HS256"
 _E2E_SUBJECT = "adam"
 _E2E_ROLES = ("admin",)
 
+# api-utils 1.0.0 rejects a token without a ``profile_id`` claim, so the persona
+# needs one. Matches the seeded admin Profile id (Profile.0.1.0.0 test data).
+_E2E_PROFILE_ID = "A00000000000000000000001"
 
-def get_auth_token() -> str:
-    """Mint a short-lived admin persona JWT for black-box tests."""
+
+def get_auth_token(**claims) -> str:
+    """
+    Mint a short-lived admin persona JWT for black-box tests.
+
+    Keyword arguments override or add payload claims, so a test that needs a
+    different scope (another `profile_id`, a `customer_id`, non-admin `roles`)
+    can borrow the same signing settings.
+    """
     secret = os.environ.get("JWT_SECRET") or _DEFAULT_JWT_SECRET
     issuer = os.environ.get("JWT_ISSUER") or _DEFAULT_JWT_ISSUER
     audience = os.environ.get("JWT_AUDIENCE") or _DEFAULT_JWT_AUDIENCE
@@ -36,7 +46,9 @@ def get_auth_token() -> str:
         "iat": now,
         "exp": now + 10 * 365 * 24 * 60 * 60,
         "roles": list(_E2E_ROLES),
+        "profile_id": _E2E_PROFILE_ID,
     }
+    payload.update(claims)
     token = jwt.encode(payload, secret, algorithm=algorithm)
     if isinstance(token, bytes):
         return token.decode("ascii")

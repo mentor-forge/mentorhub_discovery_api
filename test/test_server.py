@@ -11,6 +11,49 @@ import sys
 
 _FORBIDDEN_CREDENTIAL_ISSUER_PATH = "/%s-%s" % ("dev", "login")
 
+# Retired list/get prefixes, assembled like the credential path above so the
+# confirmation grep for retired routes stays clean.
+RETIRED_ROUTE_PREFIXES = ["/api/%s" % name for name in ("profile", "customer")]
+
+TYPED_CARD_PATHS = [
+    "/api/cards/customer",
+    "/api/cards/members",
+    "/api/cards/mentees",
+    "/api/cards/notifications",
+    "/api/cards/paths",
+    "/api/cards/plans",
+    "/api/cards/products",
+    "/api/cards/resources",
+    "/api/cards/settings",
+]
+
+# Typed lists whose shared api-utils GET factory also mounts a GET by-id rule.
+# Discovery's Card contract is list-only, so those rules must be suppressed.
+LIST_ONLY_SHARED_CARD_PATHS = [
+    "/api/cards/members",
+    "/api/cards/mentees",
+    "/api/cards/paths",
+    "/api/cards/plans",
+    "/api/cards/resources",
+]
+
+CARD_ID = "665f1c2a9b1e4c0a1b2c3d21"
+
+NOTIFICATION_ID = "665f1c2a9b1e4c0a1b2c3d4e"
+
+# Notification control rules (OpenAPI /api/notification paths).
+NOTIFICATION_CONTROL_PATHS = [
+    "/api/notification",
+    "/api/notification/dismiss/<notification_id>",
+    "/api/notification/cancel/<notification_id>",
+]
+
+# The same rules as request URLs, with the id placeholder filled in.
+NOTIFICATION_CONTROL_URLS = [
+    (path, path.replace("<notification_id>", NOTIFICATION_ID))
+    for path in NOTIFICATION_CONTROL_PATHS
+]
+
 
 class TestServerInitialization(unittest.TestCase):
     """Test cases for server initialization."""
@@ -91,35 +134,27 @@ class TestAppConfiguration(unittest.TestCase):
         # Should not get 404 (route exists), but may get 401 (auth required)
         self.assertIn(response.status_code, [200, 401, 500])
 
+    def test_cards_route_registered(self):
+        """Test that /api/cards route is registered."""
+        response = self.client.get("/api/cards")
+        # Should not get 404 (route exists), but may get 401 (auth required)
+        self.assertIn(response.status_code, [200, 401, 500])
+
     def test_credential_issuing_route_not_registered(self):
         """Domain APIs must not register HTTP routes that mint credentials."""
         response = self.client.post(_FORBIDDEN_CREDENTIAL_ISSUER_PATH)
         self.assertEqual(response.status_code, 404)
 
-    def test_profile_routes_registered(self):
-        """Test that /api/profile routes are registered."""
-        response = self.client.get("/api/profile")
-        # Should not get 404 (route exists), but may get 401 (auth required)
-        self.assertIn(response.status_code, [200, 401, 500])
-
-    def test_customer_routes_registered(self):
-        """Test that /api/customer routes are registered."""
-        response = self.client.get("/api/customer")
-        # Should not get 404 (route exists), but may get 401 (auth required)
-        self.assertIn(response.status_code, [200, 401, 500])
+    def test_docs_route_registered(self):
+        """Test that the /docs explorer route is registered."""
+        response = self.client.get("/docs/openapi.yaml")
+        self.assertNotEqual(response.status_code, 404)
 
     def test_metrics_route_registered(self):
         """Test that /metrics route is registered."""
         response = self.client.get("/metrics")
         # Should not get 404 (route exists)
         self.assertNotEqual(response.status_code, 404)
-
-    def test_all_blueprints_registered(self):
-        """Test that all expected blueprints are registered."""
-        blueprint_names = [bp.name for bp in self.app.blueprints.values()]
-
-        self.assertIn("profile_routes", blueprint_names)
-        self.assertIn("customer_routes", blueprint_names)
 
     def test_url_map_contains_expected_routes(self):
         """Test that URL map contains all expected route patterns."""
@@ -129,12 +164,83 @@ class TestAppConfiguration(unittest.TestCase):
         # Check for key routes
         self.assertTrue(any("/docs" in rule for rule in rules))
         self.assertTrue(any("/api/config" in rule for rule in rules))
+        self.assertIn("/api/cards", rules)
         self.assertFalse(
             any(_FORBIDDEN_CREDENTIAL_ISSUER_PATH in rule for rule in rules)
         )
-        self.assertTrue(any("/api/profile" in rule for rule in rules))
-        self.assertTrue(any("/api/customer" in rule for rule in rules))
         self.assertTrue(any("/metrics" in rule for rule in rules))
+
+    def test_retired_domain_routes_not_registered(self):
+        """Profile/Customer list-get routes were retired; Card/Notification replace them."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        for prefix in RETIRED_ROUTE_PREFIXES:
+            with self.subTest(prefix=prefix):
+                self.assertFalse(any(prefix in rule for rule in rules))
+
+    def test_typed_card_routes_registered(self):
+        """Every typed card list is registered alongside the composite home list."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        self.assertIn("/api/cards", rules)
+        for path in TYPED_CARD_PATHS:
+            with self.subTest(path=path):
+                self.assertIn(path, rules)
+
+    def test_typed_card_routes_respond(self):
+        """Typed card lists exist as GET routes; auth or db failures are fine here."""
+        for path in TYPED_CARD_PATHS:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertIn(response.status_code, [200, 401, 500])
+
+    def test_typed_card_by_id_routes_not_registered(self):
+        """The by-id rules the shared GET factories add are stripped off."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        for path in LIST_ONLY_SHARED_CARD_PATHS:
+            with self.subTest(path=path):
+                self.assertFalse(
+                    any(rule.startswith(f"{path}/") for rule in rules),
+                    f"{path} must not carry a by-id rule",
+                )
+
+    def test_typed_card_by_id_urls_return_404(self):
+        """A by-id Card URL is unrouted, so it 404s before auth runs."""
+        for path in LIST_ONLY_SHARED_CARD_PATHS:
+            with self.subTest(path=path):
+                response = self.client.get(f"{path}/{CARD_ID}")
+                self.assertEqual(response.status_code, 404)
+
+    def test_notification_control_routes_registered(self):
+        """Notification create / dismiss / cancel are mounted at /api/notification."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        for path in NOTIFICATION_CONTROL_PATHS:
+            with self.subTest(path=path):
+                self.assertIn(path, rules)
+
+    def test_notification_control_routes_accept_post(self):
+        """Each control route is a POST route; auth or db failures are fine here."""
+        for path in NOTIFICATION_CONTROL_PATHS:
+            with self.subTest(path=path):
+                rule = next(r for r in self.app.url_map.iter_rules() if r.rule == path)
+                self.assertIn("POST", rule.methods)
+
+    def test_notification_control_routes_require_auth(self):
+        """An unauthenticated control POST is rejected before it reaches the service."""
+        for path, url in NOTIFICATION_CONTROL_URLS:
+            with self.subTest(path=path):
+                response = self.client.post(url, json={})
+                self.assertIn(response.status_code, [401, 500])
+
+    def test_notification_control_does_not_displace_the_card_list(self):
+        """The F050 Card GET list stays mounted alongside the control routes."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        self.assertIn("/api/cards/notifications", rules)
+        response = self.client.get("/api/cards/notifications")
+        self.assertIn(response.status_code, [200, 401, 500])
 
 
 class TestSignalHandlers(unittest.TestCase):

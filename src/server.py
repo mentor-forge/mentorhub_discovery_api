@@ -1,7 +1,9 @@
 """
 Flask MongoDB API Server
 
-Discovery API for the Mentor Hub system — customer and profile list/get endpoints.
+Discovery API for the Mentor Hub system — the composite home Card list, the
+typed `/api/cards/{type}` lists, the Notification control endpoints, and the
+standard config, docs, and metrics endpoints.
 """
 
 import sys
@@ -35,21 +37,90 @@ app.json = MongoJSONEncoder(app)
 
 # Route registration (all grouped together)
 from api_utils import create_metric_routes, create_config_routes, create_explorer_routes
-from src.routes.profile_routes import create_profile_routes
-from src.routes.customer_routes import create_customer_routes
+from api_utils import (
+    create_notification_get_routes,
+    create_path_get_routes,
+    create_plan_get_routes,
+    create_profile_get_routes,
+    create_resource_get_routes,
+)
+
+from src.routes.card_routes import (
+    create_cards_get_routes,
+    create_customer_cards_get_routes,
+    create_product_cards_get_routes,
+    create_settings_cards_get_routes,
+    register_list_only_blueprint,
+)
+from src.routes.notification_routes import create_notification_routes
+from src.services.notification_service import NotificationCardService
+from src.services.path_service import PathCardService
+from src.services.plan_service import PlanCardService
+from src.services.profile_service import MemberCardService, MenteeCardService
+from src.services.resource_service import ResourceCardService
 
 # Register route blueprints
 docs_dir = os.path.join(os.path.dirname(__file__), "..", "docs")
 app.register_blueprint(create_explorer_routes(docs_dir), url_prefix="/docs")
 app.register_blueprint(create_config_routes(), url_prefix="/api/config")
-app.register_blueprint(create_profile_routes(), url_prefix="/api/profile")
-app.register_blueprint(create_customer_routes(), url_prefix="/api/customer")
+app.register_blueprint(create_cards_get_routes(), url_prefix="/api/cards")
+
+# Typed card lists: shared GET factories bound to Card-projecting subclasses,
+# plus local blueprints for the sources with no shared service class.
+app.register_blueprint(
+    create_customer_cards_get_routes(), url_prefix="/api/cards/customer"
+)
+app.register_blueprint(
+    create_product_cards_get_routes(), url_prefix="/api/cards/products"
+)
+app.register_blueprint(
+    create_settings_cards_get_routes(), url_prefix="/api/cards/settings"
+)
+
+# The shared factories below also mount a GET by-id rule. The Card contract is
+# list-only, so they register through the helper that keeps just the list rule.
+register_list_only_blueprint(
+    app,
+    create_resource_get_routes(ResourceCardService, name="resource_card_routes"),
+    "/api/cards/resources",
+)
+register_list_only_blueprint(
+    app,
+    create_path_get_routes(PathCardService, name="path_card_routes"),
+    "/api/cards/paths",
+)
+register_list_only_blueprint(
+    app,
+    create_plan_get_routes(PlanCardService, name="plan_card_routes"),
+    "/api/cards/plans",
+)
+register_list_only_blueprint(
+    app,
+    create_profile_get_routes(MemberCardService, name="member_card_routes"),
+    "/api/cards/members",
+)
+register_list_only_blueprint(
+    app,
+    create_profile_get_routes(MenteeCardService, name="mentee_card_routes"),
+    "/api/cards/mentees",
+)
+app.register_blueprint(
+    create_notification_get_routes(
+        NotificationCardService, name="notification_card_routes"
+    ),
+    url_prefix="/api/cards/notifications",
+)
+
+# Notification control: Discovery owns create, dismiss, and cancel. Bound to
+# NotificationService so mutations return Notification documents, not Cards.
+app.register_blueprint(create_notification_routes(), url_prefix="/api/notification")
 metrics = create_metric_routes(app)  # This exposes /metrics endpoint
 
 logger.info("============= Routes Registered ===============")
+logger.info("  /api/cards - Composite home card list")
+logger.info("  /api/cards/{type} - Typed card lists")
+logger.info("  /api/notification - Notification create, dismiss, cancel")
 logger.info("  /api/config - Configuration endpoint")
-logger.info("  /api/profile - Profile domain endpoints")
-logger.info("  /api/customer - Customer domain endpoints")
 logger.info("  /docs - API Explorer")
 logger.info("  /metrics - Prometheus metrics endpoint")
 
