@@ -148,7 +148,17 @@ class CardService:
         return card
 
     @classmethod
-    def _project_all(cls, card_type, documents):
+    def project_all(cls, card_type, documents):
+        """
+        Project a list of source documents onto the Card schema.
+
+        Args:
+            card_type: One of the keys in CARD_TYPE_SPECS
+            documents: The source documents to project
+
+        Returns:
+            list: The Card projections
+        """
         return [cls.project(card_type, document) for document in documents or []]
 
     @classmethod
@@ -191,7 +201,7 @@ class CardService:
                 size=section_size,
                 match={"profile_id": profile_id},
             )
-            cards.extend(cls._project_all(CARD_TYPE_NOTIFICATIONS, notifications))
+            cards.extend(cls.project_all(CARD_TYPE_NOTIFICATIONS, notifications))
 
         is_member_reader = (
             config.ROLE_CUSTOMER in roles or config.ROLE_COORDINATOR in roles
@@ -200,13 +210,13 @@ class CardService:
             members = ProfileService.get_member_profiles(
                 token, breadcrumb, offset=0, size=section_size
             )
-            cards.extend(cls._project_all(CARD_TYPE_MEMBERS, members))
+            cards.extend(cls.project_all(CARD_TYPE_MEMBERS, members))
 
         if token.get("mentor_id") and config.ROLE_MENTOR in roles:
             mentees = ProfileService.get_mentee_profiles(
                 token, breadcrumb, offset=0, size=section_size
             )
-            cards.extend(cls._project_all(CARD_TYPE_MENTEES, mentees))
+            cards.extend(cls.project_all(CARD_TYPE_MENTEES, mentees))
 
         page = cards[offset : offset + size]
         logger.info(
@@ -248,7 +258,7 @@ class CardService:
             offset=offset,
             size=size,
         )
-        return cls._project_all(card_type, documents)
+        return cls.project_all(card_type, documents)
 
     @classmethod
     def get_customer_cards(

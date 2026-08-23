@@ -1,10 +1,12 @@
 """
-Unit tests for the Discovery Card service.
+Unit tests for the Discovery Card service and the Card-projecting subclasses of
+the consume services.
 
 `project` must emit only Card schema properties, and `get_home_cards` must
 assemble its sections in the documented order, gate them on the token roles,
-and paginate the combined list. Source services are mocked; no database is
-required.
+and paginate the combined list. The typed lists must project whatever their
+source service returns, without projecting the reads the Notification control
+endpoints depend on. Source services are mocked; no database is required.
 """
 
 import unittest
@@ -13,6 +15,14 @@ from unittest.mock import MagicMock, patch
 from bson import ObjectId
 
 from api_utils.flask_utils.exceptions import HTTPBadRequest
+from src.services.notification_service import (
+    NotificationCardService,
+    NotificationService,
+)
+from src.services.path_service import PathCardService
+from src.services.plan_service import PlanCardService
+from src.services.profile_service import MemberCardService, MenteeCardService
+from src.services.resource_service import ResourceCardService
 from src.services.card_service import (
     CARD_TYPE_CUSTOMER,
     CARD_TYPE_MEMBERS,
@@ -448,6 +458,147 @@ class TestSettingsCards(TypedCardListTestCase):
         self.assertEqual(len(cards), 2)
         for card in cards:
             self.assertNotIn("type", card)
+
+
+# (Card subclass, list method, patched source, expected Card type). The source
+# is patched one level up the MRO, so each test covers the projection only.
+CARD_SUBCLASS_LISTS = [
+    (
+        ResourceCardService,
+        "get_resources",
+        "api_utils.services.resource_service.ResourceService.get_resources",
+        "Resource",
+    ),
+    (
+        PathCardService,
+        "get_paths",
+        "api_utils.services.path_service.PathService.get_paths",
+        "Path",
+    ),
+    (
+        PlanCardService,
+        "get_plans",
+        "api_utils.services.plan_service.PlanService.get_plans",
+        "Plan",
+    ),
+    (
+        MemberCardService,
+        "get_profiles",
+        "src.services.profile_service.ProfileService.get_member_profiles",
+        "Member",
+    ),
+    (
+        MenteeCardService,
+        "get_profiles",
+        "src.services.profile_service.ProfileService.get_mentee_profiles",
+        "Mentee",
+    ),
+]
+
+CARD_SUBCLASS_GETTERS = [
+    (
+        ResourceCardService,
+        "get_resource",
+        "api_utils.services.resource_service.ResourceService.get_resource",
+        "Resource",
+    ),
+    (
+        PathCardService,
+        "get_path",
+        "api_utils.services.path_service.PathService.get_path",
+        "Path",
+    ),
+    (
+        PlanCardService,
+        "get_plan",
+        "api_utils.services.plan_service.PlanService.get_plan",
+        "Plan",
+    ),
+    (
+        MemberCardService,
+        "get_profile",
+        "api_utils.services.profile_service.ProfileService.get_profile",
+        "Member",
+    ),
+    (
+        MenteeCardService,
+        "get_profile",
+        "api_utils.services.profile_service.ProfileService.get_profile",
+        "Mentee",
+    ),
+]
+
+
+class TestCardProjectingSubclasses(unittest.TestCase):
+    """The subclasses bound to the shared GET factories return Cards."""
+
+    def test_lists_project_their_source_documents(self):
+        for service_cls, method, source, card_type in CARD_SUBCLASS_LISTS:
+            with self.subTest(service=service_cls.__name__):
+                with patch(source, return_value=documents("row", 2)) as mock_source:
+                    cards = getattr(service_cls, method)(token(), BREADCRUMB)
+
+                mock_source.assert_called_once()
+                self.assertEqual(len(cards), 2)
+                for card in cards:
+                    self.assertEqual(card["type"], card_type)
+                    self.assertTrue(set(card).issubset(CARD_PROPERTIES))
+
+    def test_lists_pass_the_list_request_through(self):
+        sort_by = [("name", 1)]
+        for service_cls, method, source, _ in CARD_SUBCLASS_LISTS:
+            with self.subTest(service=service_cls.__name__):
+                with patch(source, return_value=[]) as mock_source:
+                    getattr(service_cls, method)(
+                        token(), BREADCRUMB, 5, 10, {"name": "a"}, sort_by
+                    )
+
+                args, _ = mock_source.call_args
+                self.assertEqual(args[-4:], (5, 10, {"name": "a"}, sort_by))
+
+    def test_getters_project_a_single_document(self):
+        for service_cls, method, source, card_type in CARD_SUBCLASS_GETTERS:
+            with self.subTest(service=service_cls.__name__):
+                document = {"_id": ObjectId(), "name": "One"}
+                with patch(source, return_value=document):
+                    card = getattr(service_cls, method)("an-id", token(), BREADCRUMB)
+
+                self.assertEqual(card["type"], card_type)
+                self.assertTrue(set(card).issubset(CARD_PROPERTIES))
+
+
+class TestNotificationCardIsolation(unittest.TestCase):
+    """Projection is confined to the cards subclass, not the control service."""
+
+    def setUp(self):
+        self.notifications = [{"_id": ObjectId(), "name": "welcome", "message": "Hi"}]
+        patcher = patch(
+            "api_utils.services.notification_service.NotificationService"
+            ".get_notifications",
+            return_value=self.notifications,
+        )
+        self.addCleanup(patcher.stop)
+        self.mock_source = patcher.start()
+
+    def test_cards_subclass_projects_the_list(self):
+        cards = NotificationCardService.get_notifications(token(), BREADCRUMB)
+
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]["type"], "Notification")
+        self.assertEqual(cards[0]["description"], "Hi")
+
+    def test_control_service_still_returns_notification_documents(self):
+        notifications = NotificationService.get_notifications(token(), BREADCRUMB)
+
+        self.assertEqual(notifications, self.notifications)
+        self.assertIn("message", notifications[0])
+
+    def test_active_read_returns_notification_documents(self):
+        notifications = NotificationService.get_active_notifications(
+            token(), BREADCRUMB
+        )
+
+        self.assertEqual(notifications, self.notifications)
 
 
 if __name__ == "__main__":

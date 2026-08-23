@@ -32,6 +32,18 @@ def active_match():
     }
 
 
+def _notification_cards(notifications):
+    """
+    Project Notification documents onto Notification Cards.
+
+    `card_service` imports this module for the composite home list, so the Card
+    import happens at call time rather than at module scope.
+    """
+    from src.services.card_service import CARD_TYPE_NOTIFICATIONS, CardService
+
+    return CardService.project_all(CARD_TYPE_NOTIFICATIONS, notifications)
+
+
 class NotificationService(SharedNotificationService):
     """
     Discovery subclass of the shared Notification service.
@@ -168,3 +180,29 @@ class NotificationService(SharedNotificationService):
             size=size,
             match=and_match(active_match(), match or {}),
         )
+
+
+class NotificationCardService(NotificationService):
+    """
+    Notification read surface projected onto the Card schema.
+
+    Bound to `create_notification_get_routes` for `/api/cards/notifications`.
+    Projection lives here and not on `NotificationService` so create, dismiss,
+    and cancel keep returning the Notification document.
+    """
+
+    @classmethod
+    def get_notifications(
+        cls,
+        token,
+        breadcrumb,
+        *,
+        offset=DEFAULT_OFFSET,
+        size=DEFAULT_SIZE,
+        match=None,
+    ):
+        """Get the visible Notifications as Cards."""
+        notifications = super().get_notifications(
+            token, breadcrumb, offset=offset, size=size, match=match
+        )
+        return _notification_cards(notifications)

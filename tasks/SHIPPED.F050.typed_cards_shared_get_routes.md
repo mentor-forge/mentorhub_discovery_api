@@ -1,6 +1,6 @@
 # F050 – Typed GET /api/cards/{type} via shared GET factories
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Feature  
 **Depends On**: `F040_home_cards_get_factory`  
 **Description**: Add one Card-array list endpoint per remaining landing-nav item. Prefer `api_utils` shared GET factories with local subclasses that project to Card. Use a local list factory only when no shared factory exists.
@@ -99,4 +99,62 @@ The agent must not update files outside this list. Do not add Notification POST/
 
 ## Execution Notes
 
-_Reserved for the task execution agent._
+**Plan**
+
+1. `CardService._project_all` becomes public `project_all(card_type, documents)` so the consume
+   services can project without reaching into a private helper. No behaviour change.
+2. One Card-projecting subclass per consume service, registered with the shared factory:
+   - `ResourceCardService` / `PathCardService` / `PlanCardService` — `super()` then project the
+     list and the by-id document.
+   - `MemberCardService` / `MenteeCardService` in `profile_service.py` — `get_profiles` delegates
+     to `get_member_profiles` / `get_mentee_profiles` (identity scope already AND'd on there) and
+     projects; `get_profile` projects the shared by-id read.
+   - `NotificationCardService` in `notification_service.py` — projects `get_notifications` only.
+3. **Notification projection isolation**: `NotificationService.get_notifications` is left
+   untouched, so `create_notification`, `dismiss_notification`, and `cancel_notification` keep
+   returning Notification documents for F060. Only the cards-only subclass bound to
+   `create_notification_get_routes` projects.
+4. `card_service.py` imports `notification_service` and `profile_service`, so those two modules
+   import `CardService` at call time inside a small module-level projection helper rather than at
+   module scope. `resource/path/plan_service.py` are not part of that cycle and import normally.
+5. Customer / products / settings have no shared factory: `card_routes.py` gets a private local
+   factory (token, breadcrumb, `parse_list_request` with the F030 specs, late-bound
+   `CardService` getter so tests can patch it, jsonify array) wrapped by three named factories.
+   `_auth_context` / `_json_ok` from F040 are reused.
+6. `server.py` registers the nine typed prefixes with unique blueprint `name=` values; home
+   `GET /api/cards` is unchanged.
+
+**Decisions**
+
+- The shared Resource/Path/Plan/Profile factories also mount a by-id GET. Those rules exist in the
+  URL map but are not in `docs/openapi.yaml` (this issue documents the list GET only), so the
+  by-id getters project a Card too rather than leaking a raw document.
+- `/api/cards/notifications` lists every visible Notification (shared outbound RBAC), not just the
+  active ones — that matches the F020 OpenAPI description. The active-only read stays on the
+  composite home list.
+- `test/test_server.py` swaps `test_typed_card_routes_not_registered_yet` for a positive URL-map
+  assertion over every typed prefix, and adds a negative assertion that the Notification control
+  routes are still absent until F060.
+
+**Results**
+
+- `pipenv run test` — 104 passed, 93 subtests passed, 35 deselected.
+- `pipenv run lint` — clean; `pipenv run build` — clean.
+- `rg 'execute_infinite_scroll_query|after_id|has_more|next_cursor' src test docs/openapi.yaml` —
+  zero hits.
+- `pipenv run container` / `pipenv run api` / `pipenv run e2e` — 33 passed, 2 skipped. The skips
+  are `/api/cards/members` and `/api/cards/mentees`: the admin e2e persona carries no
+  `customer_id` or `mentor_id`, so both lists are correctly empty.
+- Spot checked against seed data: resources, paths, notifications, plans project their Card type;
+  customer, products, and settings omit `type`; the factory by-id routes project a Card too.
+
+**Follow-ups**
+
+- `README.md` still says the typed Card lists "land in follow-up tasks" — F070 owns that file.
+- The shared Resource/Path/Plan/Profile factories mount by-id GETs under the typed prefixes that
+  `docs/openapi.yaml` does not document. Either document them or drop them once F060/F070 settle
+  the surface.
+
+### Orchestrator confirmation
+
+Re-ran `pipenv run test` (104 passed, 35 e2e deselected), `pipenv run lint`, `pipenv run build`. Infinite-scroll grep still zero hits. Notification control routes still absent. Status set to Shipped.

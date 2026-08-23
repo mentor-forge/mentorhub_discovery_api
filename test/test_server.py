@@ -11,6 +11,18 @@ import sys
 
 _FORBIDDEN_CREDENTIAL_ISSUER_PATH = "/%s-%s" % ("dev", "login")
 
+TYPED_CARD_PATHS = [
+    "/api/cards/customer",
+    "/api/cards/members",
+    "/api/cards/mentees",
+    "/api/cards/notifications",
+    "/api/cards/paths",
+    "/api/cards/plans",
+    "/api/cards/products",
+    "/api/cards/resources",
+    "/api/cards/settings",
+]
+
 
 class TestServerInitialization(unittest.TestCase):
     """Test cases for server initialization."""
@@ -134,12 +146,27 @@ class TestAppConfiguration(unittest.TestCase):
         self.assertFalse(any("/api/profile" in rule for rule in rules))
         self.assertFalse(any("/api/customer" in rule for rule in rules))
 
-    def test_typed_card_routes_not_registered_yet(self):
-        """Only the composite home list ships here; typed card lists come later."""
+    def test_typed_card_routes_registered(self):
+        """Every typed card list is registered alongside the composite home list."""
         rules = [rule.rule for rule in self.app.url_map.iter_rules()]
-        card_rules = [rule for rule in rules if rule.startswith("/api/cards")]
 
-        self.assertEqual(card_rules, ["/api/cards"])
+        self.assertIn("/api/cards", rules)
+        for path in TYPED_CARD_PATHS:
+            with self.subTest(path=path):
+                self.assertIn(path, rules)
+
+    def test_typed_card_routes_respond(self):
+        """Typed card lists exist as GET routes; auth or db failures are fine here."""
+        for path in TYPED_CARD_PATHS:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertIn(response.status_code, [200, 401, 500])
+
+    def test_notification_control_routes_not_registered_yet(self):
+        """Notification create / dismiss / cancel land in a follow-up task."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        self.assertFalse(any(rule.startswith("/api/notification") for rule in rules))
 
 
 class TestSignalHandlers(unittest.TestCase):

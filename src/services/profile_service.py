@@ -3,7 +3,8 @@ Discovery Profile service.
 
 Discovery **consumes** Profile: the shared consume surface (get-by-token,
 get-by-id, paginated list) is inherited unchanged. The Discovery-only additions
-are the identity-scoped Member and Mentee lists that back the Card endpoints.
+are the identity-scoped Member and Mentee lists that back the Card endpoints,
+plus the two Card-projecting subclasses the typed Card routes bind to.
 """
 
 import logging
@@ -27,6 +28,24 @@ from api_utils.services.profile_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# `card_service` imports this module to assemble the composite home list, so the
+# two helpers below import CardService at call time rather than at module scope.
+
+
+def _member_cards(profiles):
+    """Project Profile documents onto Member Cards."""
+    from src.services.card_service import CARD_TYPE_MEMBERS, CardService
+
+    return CardService.project_all(CARD_TYPE_MEMBERS, profiles)
+
+
+def _mentee_cards(profiles):
+    """Project Profile documents onto Mentee Cards."""
+    from src.services.card_service import CARD_TYPE_MENTEES, CardService
+
+    return CardService.project_all(CARD_TYPE_MENTEES, profiles)
 
 
 class ProfileService(SharedProfileService):
@@ -161,3 +180,66 @@ class ProfileService(SharedProfileService):
             filters,
             sort_by,
         )
+
+
+class MemberCardService(ProfileService):
+    """
+    Member view of Profile projected onto the Card schema.
+
+    Bound to `create_profile_get_routes` for `/api/cards/members`. The list is
+    the token `customer_id` scope, which is narrower than the shared Profile
+    list, so it delegates to `get_member_profiles` rather than to `super()`.
+    """
+
+    @classmethod
+    def get_profiles(
+        cls,
+        token,
+        breadcrumb,
+        offset=DEFAULT_OFFSET,
+        size=DEFAULT_SIZE,
+        filters=None,
+        sort_by=None,
+    ):
+        """Get the caller's org members as Cards."""
+        profiles = cls.get_member_profiles(
+            token, breadcrumb, offset, size, filters, sort_by
+        )
+        return _member_cards(profiles)
+
+    @classmethod
+    def get_profile(cls, profile_id, token, breadcrumb):
+        """Get a single visible Profile as a Member Card."""
+        profile = super().get_profile(profile_id, token, breadcrumb)
+        return _member_cards([profile])[0]
+
+
+class MenteeCardService(ProfileService):
+    """
+    Mentee view of Profile projected onto the Card schema.
+
+    Bound to `create_profile_get_routes` for `/api/cards/mentees`. The list is
+    the token `mentor_id` scope, so it delegates to `get_mentee_profiles`.
+    """
+
+    @classmethod
+    def get_profiles(
+        cls,
+        token,
+        breadcrumb,
+        offset=DEFAULT_OFFSET,
+        size=DEFAULT_SIZE,
+        filters=None,
+        sort_by=None,
+    ):
+        """Get the caller's mentees as Cards."""
+        profiles = cls.get_mentee_profiles(
+            token, breadcrumb, offset, size, filters, sort_by
+        )
+        return _mentee_cards(profiles)
+
+    @classmethod
+    def get_profile(cls, profile_id, token, breadcrumb):
+        """Get a single visible Profile as a Mentee Card."""
+        profile = super().get_profile(profile_id, token, breadcrumb)
+        return _mentee_cards([profile])[0]
