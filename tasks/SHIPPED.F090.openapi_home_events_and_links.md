@@ -1,6 +1,6 @@
 # F090 – OpenAPI for home composite, remaining typed lists, Events, and Card links
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Defect  
 **Depends On**: `F080_suppress_card_by_id_gets`  
 **Description**: Rewrite the Discovery Card OpenAPI so it matches the corrected home composite, the reduced typed-list surface, the new Events list, and the Card `link` conventions. Docs only — no Python.
@@ -115,3 +115,21 @@ This task does **not** require Python tests to match the new path set yet (route
 The agent must not update files outside this list.
 
 ## Execution Notes
+
+### Implementation Summary
+- Fetched live schemas from MongoDB configurator:
+  - `Card.yaml` (version `0.0.0.0`): properties `_id`, `description`, `link` (format `uri`), `name`, `type` (enum `["Event", "Member", "Mentee", "Notification", "Path", "Plan", "Resource"]`).
+  - `Event.yaml` (`latest`): properties `_id`, `context` (`profile_id`), `created` breadcrumb, `type` (enum: `advanced`, `arrived`, `completed`, etc.).
+- Bumped `info.version` to `0.3.0` in `docs/openapi.yaml`.
+- Updated `GET /api/cards` description with the exact eight-section composite order, role gates, sorts, and link omission/behavior.
+- Updated `GET /api/cards/resources`, `GET /api/cards/paths`, `GET /api/cards/plans`, and `GET /api/cards/notifications` descriptions to include link conventions.
+- Removed doomed typed Card paths (`/api/cards/customer`, `/api/cards/members`, `/api/cards/mentees`, `/api/cards/products`, `/api/cards/settings`).
+- Added `GET /api/cards/events` list endpoint with `type` in-list filter, `profile_id` query param, `sort_by` (`created.at_time`, `type`), and `order` (`desc`, `asc`).
+
+### Verification Results
+- Validated YAML with PyYAML: successfully parsed without errors.
+- Unit tests: 140 passed in 0.26s (`pipenv run test`).
+- Lint: clean (`pipenv run lint`).
+- Build: successful (`pipenv run build`).
+- Packaging & live server: `pipenv run container && pipenv run api` built and deployed container `discovery_api`.
+- Verified live served spec `http://localhost:8397/docs/openapi.yaml`: version 0.3.0, `/api/cards/events` present, doomed `/api/cards/members` absent.
