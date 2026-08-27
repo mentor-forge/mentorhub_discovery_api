@@ -1,6 +1,6 @@
 # F091 – Token-aware Card `link` projection
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Defect  
 **Depends On**: `F090_openapi_home_events_and_links`  
 **Description**: Teach `CardService.project` to emit the SPA `link` values from F090. Remaining typed lists start returning the new links immediately. Home Notification cards keep omitting `link`. Do not change home section membership or delete typed routes.
@@ -82,3 +82,27 @@ Run all commands from this API repository root.
 The agent must not update files outside this list. Do not change OpenAPI. Do not add or remove HTTP routes.
 
 ## Execution Notes
+
+### Implementation Summary
+- Updated `CardService.project` and `CardService.project_all` to accept `token` and `notification_link=False`:
+  - Member -> `customer/profile/{id}`
+  - Mentee -> `mentee/mentee/{id}`
+  - Resource -> `mentor/resource/{id}` (if `ROLE_MENTOR` in roles) else `mentee/resource/{id}`. Stopped copying `url` to `link`.
+  - Path -> `mentor/path/{id}` (if `ROLE_MENTOR` in roles) else `mentee/path/{id}`.
+  - Plan -> `mentor/plan/{id}`.
+  - Notification -> `discovery/notification/{id}` only when `notification_link=True`; omits `link` when `notification_link=False`.
+- Updated callers to pass `token` into `project_all`:
+  - `src/services/resource_service.py` (`ResourceCardService.get_resources`)
+  - `src/services/path_service.py` (`PathCardService.get_paths`)
+  - `src/services/plan_service.py` (`PlanCardService.get_plans`)
+  - `src/services/notification_service.py` (`NotificationCardService.get_notifications` passes `notification_link=True`)
+  - `src/services/profile_service.py` (`_member_cards`, `_mentee_cards`, and subclasses)
+  - `src/services/card_service.py` (`get_home_cards`)
+- Updated and expanded unit tests in `test/services/test_card_service.py` to cover all link projection scenarios.
+
+### Verification Results
+- `pipenv run format && pipenv run lint && pipenv run test`: 144 passed in 0.26s, lint clean.
+- `pipenv run build`: passed cleanly.
+- `pipenv run container && pipenv run api`: image built and service running.
+- `pipenv run e2e`: 58 passed in 0.33s.
+- `curl -s http://localhost:8397/docs/openapi.yaml`: served spec valid.

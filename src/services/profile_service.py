@@ -34,18 +34,18 @@ logger = logging.getLogger(__name__)
 # two helpers below import CardService at call time rather than at module scope.
 
 
-def _member_cards(profiles):
+def _member_cards(profiles, token=None):
     """Project Profile documents onto Member Cards."""
     from src.services.card_service import CARD_TYPE_MEMBERS, CardService
 
-    return CardService.project_all(CARD_TYPE_MEMBERS, profiles)
+    return CardService.project_all(CARD_TYPE_MEMBERS, profiles, token=token)
 
 
-def _mentee_cards(profiles):
+def _mentee_cards(profiles, token=None):
     """Project Profile documents onto Mentee Cards."""
     from src.services.card_service import CARD_TYPE_MENTEES, CardService
 
-    return CardService.project_all(CARD_TYPE_MENTEES, profiles)
+    return CardService.project_all(CARD_TYPE_MENTEES, profiles, token=token)
 
 
 class ProfileService(SharedProfileService):
@@ -205,7 +205,7 @@ class MemberCardService(ProfileService):
         profiles = cls.get_member_profiles(
             token, breadcrumb, offset, size, filters, sort_by
         )
-        return _member_cards(profiles)
+        return _member_cards(profiles, token=token)
 
 
 class MenteeCardService(ProfileService):
@@ -230,4 +230,4 @@ class MenteeCardService(ProfileService):
         profiles = cls.get_mentee_profiles(
             token, breadcrumb, offset, size, filters, sort_by
         )
-        return _mentee_cards(profiles)
+        return _mentee_cards(profiles, token=token)

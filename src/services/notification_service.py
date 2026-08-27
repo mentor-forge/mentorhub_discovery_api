@@ -32,7 +32,7 @@ def active_match():
     }
 
 
-def _notification_cards(notifications):
+def _notification_cards(notifications, token=None, *, notification_link=False):
     """
     Project Notification documents onto Notification Cards.
 
@@ -41,7 +41,12 @@ def _notification_cards(notifications):
     """
     from src.services.card_service import CARD_TYPE_NOTIFICATIONS, CardService
 
-    return CardService.project_all(CARD_TYPE_NOTIFICATIONS, notifications)
+    return CardService.project_all(
+        CARD_TYPE_NOTIFICATIONS,
+        notifications,
+        token=token,
+        notification_link=notification_link,
+    )
 
 
 class NotificationService(SharedNotificationService):
@@ -205,4 +210,4 @@ class NotificationCardService(NotificationService):
         notifications = super().get_notifications(
             token, breadcrumb, offset=offset, size=size, match=match
         )
-        return _notification_cards(notifications)
+        return _notification_cards(notifications, token=token, notification_link=True)

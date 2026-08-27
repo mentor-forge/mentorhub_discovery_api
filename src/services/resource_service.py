@@ -38,4 +38,4 @@ class ResourceCardService(ResourceService):
         resources = super().get_resources(
             token, breadcrumb, offset, size, filters, sort_by
         )
-        return CardService.project_all(CARD_TYPE_RESOURCES, resources)
+        return CardService.project_all(CARD_TYPE_RESOURCES, resources, token=token)

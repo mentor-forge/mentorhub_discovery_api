@@ -54,11 +54,6 @@ CARD_TYPE_SETTINGS = "settings"
 # Card field -> ordered source field candidates; the first present value wins.
 _NAMED_FIELDS = {"name": ("name",), "description": ("description",)}
 _PROFILE_FIELDS = {"name": ("full_name", "name"), "description": ("description",)}
-_RESOURCE_FIELDS = {
-    "name": ("name",),
-    "description": ("description",),
-    "link": ("url",),
-}
 _NOTIFICATION_FIELDS = {"name": ("name",), "description": ("message",)}
 
 # `type` is optional in the Card schema and its enum is
@@ -76,7 +71,7 @@ CARD_TYPE_SPECS = {
     CARD_TYPE_PATHS: {"type": "Path", "fields": _NAMED_FIELDS},
     CARD_TYPE_PLANS: {"type": "Plan", "fields": _NAMED_FIELDS},
     CARD_TYPE_PRODUCTS: {"type": None, "fields": _NAMED_FIELDS},
-    CARD_TYPE_RESOURCES: {"type": "Resource", "fields": _RESOURCE_FIELDS},
+    CARD_TYPE_RESOURCES: {"type": "Resource", "fields": _NAMED_FIELDS},
     CARD_TYPE_SETTINGS: {"type": None, "fields": _NAMED_FIELDS},
 }
 
@@ -107,7 +102,7 @@ class CardService:
     """
 
     @classmethod
-    def project(cls, card_type, document):
+    def project(cls, card_type, document, token=None, *, notification_link=False):
         """
         Project a source document onto the Card schema.
 
@@ -118,6 +113,8 @@ class CardService:
         Args:
             card_type: One of the keys in CARD_TYPE_SPECS
             document: The source document to project
+            token: Authentication token dictionary (optional)
+            notification_link: Whether to emit link for Notification cards
 
         Returns:
             dict: The Card projection
@@ -145,21 +142,54 @@ class CardService:
         if spec["type"] is not None:
             card["type"] = spec["type"]
 
+        token_dict = token or {}
+        roles = token_dict.get("roles") or []
+        config = Config.get_instance()
+        doc_id = source.get("_id")
+        id_str = str(doc_id) if doc_id is not None else None
+
+        if id_str is not None:
+            if card_type in (CARD_TYPE_NOTIFICATION, CARD_TYPE_NOTIFICATIONS):
+                if notification_link:
+                    card["link"] = f"discovery/notification/{id_str}"
+            elif card_type in (CARD_TYPE_MEMBER, CARD_TYPE_MEMBERS):
+                card["link"] = f"customer/profile/{id_str}"
+            elif card_type in (CARD_TYPE_MENTEE, CARD_TYPE_MENTEES):
+                card["link"] = f"mentee/mentee/{id_str}"
+            elif card_type == CARD_TYPE_RESOURCES:
+                prefix = "mentor" if config.ROLE_MENTOR in roles else "mentee"
+                card["link"] = f"{prefix}/resource/{id_str}"
+            elif card_type == CARD_TYPE_PATHS:
+                prefix = "mentor" if config.ROLE_MENTOR in roles else "mentee"
+                card["link"] = f"{prefix}/path/{id_str}"
+            elif card_type == CARD_TYPE_PLANS:
+                card["link"] = f"mentor/plan/{id_str}"
+
         return card
 
     @classmethod
-    def project_all(cls, card_type, documents):
+    def project_all(cls, card_type, documents, token=None, *, notification_link=False):
         """
         Project a list of source documents onto the Card schema.
 
         Args:
             card_type: One of the keys in CARD_TYPE_SPECS
             documents: The source documents to project
+            token: Authentication token dictionary (optional)
+            notification_link: Whether to emit link for Notification cards
 
         Returns:
             list: The Card projections
         """
-        return [cls.project(card_type, document) for document in documents or []]
+        return [
+            cls.project(
+                card_type,
+                document,
+                token=token,
+                notification_link=notification_link,
+            )
+            for document in documents or []
+        ]
 
     @classmethod
     def get_home_cards(
@@ -201,7 +231,14 @@ class CardService:
                 size=section_size,
                 match={"profile_id": profile_id},
             )
-            cards.extend(cls.project_all(CARD_TYPE_NOTIFICATIONS, notifications))
+            cards.extend(
+                cls.project_all(
+                    CARD_TYPE_NOTIFICATIONS,
+                    notifications,
+                    token=token,
+                    notification_link=False,
+                )
+            )
 
         is_member_reader = (
             config.ROLE_CUSTOMER in roles or config.ROLE_COORDINATOR in roles
@@ -210,13 +247,13 @@ class CardService:
             members = ProfileService.get_member_profiles(
                 token, breadcrumb, offset=0, size=section_size
             )
-            cards.extend(cls.project_all(CARD_TYPE_MEMBERS, members))
+            cards.extend(cls.project_all(CARD_TYPE_MEMBERS, members, token=token))
 
         if token.get("mentor_id") and config.ROLE_MENTOR in roles:
             mentees = ProfileService.get_mentee_profiles(
                 token, breadcrumb, offset=0, size=section_size
             )
-            cards.extend(cls.project_all(CARD_TYPE_MENTEES, mentees))
+            cards.extend(cls.project_all(CARD_TYPE_MENTEES, mentees, token=token))
 
         page = cards[offset : offset + size]
         logger.info(

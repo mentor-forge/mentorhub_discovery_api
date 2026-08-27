@@ -36,4 +36,4 @@ class PathCardService(PathService):
     ):
         """Get the visible Paths as Cards."""
         paths = super().get_paths(token, breadcrumb, offset, size, filters, sort_by)
-        return CardService.project_all(CARD_TYPE_PATHS, paths)
+        return CardService.project_all(CARD_TYPE_PATHS, paths, token=token)

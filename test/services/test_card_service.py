@@ -116,8 +116,9 @@ class TestProject(unittest.TestCase):
         self.assertIs(card["_id"], source_id)
 
     def test_project_omits_absent_fields(self):
-        card = CardService.project(CARD_TYPE_PATHS, {"_id": ObjectId()})
+        card = CardService.project(CARD_TYPE_PATHS, {})
 
+        self.assertNotIn("_id", card)
         self.assertNotIn("name", card)
         self.assertNotIn("description", card)
         self.assertNotIn("link", card)
@@ -144,13 +145,74 @@ class TestProject(unittest.TestCase):
 
         self.assertEqual(card["name"], "j")
 
-    def test_project_resource_links_to_url(self):
-        source = {"_id": ObjectId(), "name": "Docs", "url": "https://example.com"}
+    def test_project_resource_links_mentor_vs_non_mentor(self):
+        source_id = ObjectId()
+        source = {"_id": source_id, "name": "Docs", "url": "https://example.com"}
 
-        card = CardService.project(CARD_TYPE_RESOURCES, source)
+        card_mentor = CardService.project(
+            CARD_TYPE_RESOURCES, source, token=token(roles=["mentor"])
+        )
+        self.assertEqual(card_mentor["link"], f"mentor/resource/{source_id}")
+        self.assertEqual(card_mentor["type"], "Resource")
 
-        self.assertEqual(card["link"], "https://example.com")
-        self.assertEqual(card["type"], "Resource")
+        card_mentee = CardService.project(
+            CARD_TYPE_RESOURCES, source, token=token(roles=["mentee"])
+        )
+        self.assertEqual(card_mentee["link"], f"mentee/resource/{source_id}")
+
+        card_no_roles = CardService.project(CARD_TYPE_RESOURCES, source)
+        self.assertEqual(card_no_roles["link"], f"mentee/resource/{source_id}")
+
+    def test_project_path_links_mentor_vs_non_mentor(self):
+        source_id = ObjectId()
+        source = {"_id": source_id, "name": "Python Path"}
+
+        card_mentor = CardService.project(
+            CARD_TYPE_PATHS, source, token=token(roles=["mentor"])
+        )
+        self.assertEqual(card_mentor["link"], f"mentor/path/{source_id}")
+        self.assertEqual(card_mentor["type"], "Path")
+
+        card_mentee = CardService.project(
+            CARD_TYPE_PATHS, source, token=token(roles=["mentee"])
+        )
+        self.assertEqual(card_mentee["link"], f"mentee/path/{source_id}")
+
+    def test_project_plan_links_mentor_path(self):
+        source_id = ObjectId()
+        source = {"_id": source_id, "name": "Study Plan"}
+
+        card = CardService.project(
+            CARD_TYPE_PLANS, source, token=token(roles=["mentee"])
+        )
+        self.assertEqual(card["link"], f"mentor/plan/{source_id}")
+        self.assertEqual(card["type"], "Plan")
+
+    def test_project_member_and_mentee_links(self):
+        source_id = ObjectId()
+        member_card = CardService.project(
+            CARD_TYPE_MEMBERS, {"_id": source_id, "name": "Member"}
+        )
+        self.assertEqual(member_card["link"], f"customer/profile/{source_id}")
+
+        mentee_card = CardService.project(
+            CARD_TYPE_MENTEES, {"_id": source_id, "name": "Mentee"}
+        )
+        self.assertEqual(mentee_card["link"], f"mentee/mentee/{source_id}")
+
+    def test_project_notification_link_flag(self):
+        source_id = ObjectId()
+        source = {"_id": source_id, "name": "N", "message": "msg"}
+
+        card_home = CardService.project(
+            CARD_TYPE_NOTIFICATIONS, source, notification_link=False
+        )
+        self.assertNotIn("link", card_home)
+
+        card_typed = CardService.project(
+            CARD_TYPE_NOTIFICATIONS, source, notification_link=True
+        )
+        self.assertEqual(card_typed["link"], f"discovery/notification/{source_id}")
 
     def test_project_typed_sources_use_enum_values(self):
         expected = {
@@ -559,6 +621,10 @@ class TestNotificationCardIsolation(unittest.TestCase):
         self.assertEqual(len(cards), 1)
         self.assertEqual(cards[0]["type"], "Notification")
         self.assertEqual(cards[0]["description"], "Hi")
+        self.assertEqual(
+            cards[0]["link"],
+            f"discovery/notification/{self.notifications[0]['_id']}",
+        )
 
     def test_control_service_still_returns_notification_documents(self):
         notifications = NotificationService.get_notifications(token(), BREADCRUMB)
