@@ -33,7 +33,7 @@ info:
 
     For local development, obtain a JWT from the Developer Edition welcome / IdP flow, or use a
     test token from `test/e2e/e2e_auth.py` that matches your `JWT_SECRET` and expected claims.
-  version: 0.2.0
+  version: 0.3.0
   contact:
     name: Mentor Forge
     email: info@agile-learning-institute.com
@@ -61,18 +61,31 @@ paths:
         - Cards
       summary: Home cards (composite)
       description: |
-        Returns the composite home Card list for the caller, assembled in this order:
+        Returns the composite home Card list for the caller, assembled in this exact order:
 
-        1. **Active Notifications** for the token `profile_id` — notifications that have neither a
-           `dismissed` nor a `cancelled` breadcrumb.
-        2. **Members** — Profile Cards scoped by the token `customer_id`, included only when the
-           token roles contain Customer or Coordinator (`Config.ROLE_CUSTOMER`,
-           `Config.ROLE_COORDINATOR`).
-        3. **Mentees** — Profile Cards scoped by the token `mentor_id`, included only when the
-           token roles contain Mentor (`Config.ROLE_MENTOR`).
+        1. **Active Notifications** for the token `profile_id` (newest `created.at_time` first;
+           neither `dismissed` nor `cancelled`). Omitted if no `profile_id`. Home Notification
+           cards omit `link` (the SPA opens a Dismiss confirmation rather than a detail route).
+        2. If token roles contain Admin (`Config.ROLE_ADMIN`): one synthetic **Products** card
+           (`link: "admin/products"`, omits `type` and `_id`).
+        3. If token roles contain Admin: one synthetic **Discounts** card
+           (`link: "admin/discounts"`, omits `type` and `_id`).
+        4. If token roles contain Admin: one synthetic **Logs** card
+           (`link: "admin/logs"`, omits `type` and `_id`).
+        5. If token roles contain Customer (`Config.ROLE_CUSTOMER`) and `customer_id` is present:
+           one **Customer** card for token `customer_id` (`link: "customer/customer/{id}"`,
+           omits `type`).
+        6. If token roles contain Customer or Coordinator (`Config.ROLE_CUSTOMER`,
+           `Config.ROLE_COORDINATOR`) and `customer_id` is present: **Member** cards for Profiles
+           with token `customer_id`, ordered newest `saved.at_time` first (`link: "customer/profile/{id}"`).
+        7. If token roles contain Mentor (`Config.ROLE_MENTOR`) and `mentor_id` is present:
+           **Mentee** cards for Profiles with token `mentor_id`, ordered newest `saved.at_time`
+           first (`link: "mentee/mentee/{id}"`).
+        8. If token roles contain Mentee (`Config.ROLE_MENTEE`): one synthetic **Learning Journey**
+           card (`link: "mentee/journey"`, omits `type` and `_id`).
 
-        `offset` and `size` apply to the combined composite list. This operation paginates only; the
-        typed lists carry the per-type filter and order parameters.
+        `offset` and `size` apply to the combined composite list. This operation paginates only;
+        the typed lists carry per-type filter and order parameters.
       operationId: getHomeCards
       security:
         - bearerAuth: []
@@ -89,115 +102,15 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/cards/customer:
-    get:
-      tags:
-        - Cards
-      summary: Customer cards
-      description: |
-        Returns Customer Cards visible to the caller, scoped by outbound RBAC from the token.
-      operationId: getCustomerCards
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/OffsetHeader'
-        - $ref: '#/components/parameters/SizeHeader'
-        - $ref: '#/components/parameters/NameContainsQuery'
-        - name: sort_by
-          in: query
-          required: false
-          description: Field to sort by
-          schema:
-            type: string
-            default: name
-            enum:
-              - name
-        - $ref: '#/components/parameters/OrderAscQuery'
-      responses:
-        '200':
-          $ref: '#/components/responses/CardArray'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/cards/members:
-    get:
-      tags:
-        - Cards
-      summary: Member cards
-      description: |
-        Returns Profile Cards for the token `customer_id` when the token roles contain Customer or
-        Coordinator (`Config.ROLE_CUSTOMER`, `Config.ROLE_COORDINATOR`). Outbound RBAC hides
-        archived and out-of-scope Profiles, so a caller without those roles receives an empty array
-        rather than an error. Uses the default list pagination headers and query parameters.
-      operationId: getMemberCards
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/OffsetHeader'
-        - $ref: '#/components/parameters/SizeHeader'
-        - $ref: '#/components/parameters/NameContainsQuery'
-        - $ref: '#/components/parameters/FullNameContainsQuery'
-        - $ref: '#/components/parameters/EmailContainsQuery'
-        - $ref: '#/components/parameters/DescriptionContainsQuery'
-        - $ref: '#/components/parameters/StatusInListQuery'
-        - $ref: '#/components/parameters/RolesInListQuery'
-        - $ref: '#/components/parameters/ProfileSortByQuery'
-        - $ref: '#/components/parameters/OrderAscQuery'
-      responses:
-        '200':
-          $ref: '#/components/responses/CardArray'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/cards/mentees:
-    get:
-      tags:
-        - Cards
-      summary: Mentee cards
-      description: |
-        Returns Profile Cards for the token `mentor_id` when the token roles contain Mentor
-        (`Config.ROLE_MENTOR`). Outbound RBAC hides archived and out-of-scope Profiles, so a caller
-        without that role receives an empty array rather than an error. Uses the default list
-        pagination headers and query parameters.
-      operationId: getMenteeCards
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/OffsetHeader'
-        - $ref: '#/components/parameters/SizeHeader'
-        - $ref: '#/components/parameters/NameContainsQuery'
-        - $ref: '#/components/parameters/FullNameContainsQuery'
-        - $ref: '#/components/parameters/EmailContainsQuery'
-        - $ref: '#/components/parameters/DescriptionContainsQuery'
-        - $ref: '#/components/parameters/StatusInListQuery'
-        - $ref: '#/components/parameters/RolesInListQuery'
-        - $ref: '#/components/parameters/ProfileSortByQuery'
-        - $ref: '#/components/parameters/OrderAscQuery'
-      responses:
-        '200':
-          $ref: '#/components/responses/CardArray'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
   /api/cards/resources:
     get:
       tags:
         - Cards
       summary: Resource cards
       description: |
-        Returns Resource Cards visible to the caller, scoped by outbound RBAC from the token.
+        Returns Resource Cards visible to the caller, scoped by outbound RBAC from the token. Each
+        card has `type: Resource` and `link: "mentor/resource/{id}"` when token roles contain Mentor
+        (`Config.ROLE_MENTOR`), else `link: "mentee/resource/{id}"`.
       operationId: getResourceCards
       security:
         - bearerAuth: []
@@ -261,7 +174,9 @@ paths:
         - Cards
       summary: Path cards
       description: |
-        Returns Path Cards visible to the caller, scoped by outbound RBAC from the token.
+        Returns Path Cards visible to the caller, scoped by outbound RBAC from the token. Each card
+        has `type: Path` and `link: "mentor/path/{id}"` when token roles contain Mentor
+        (`Config.ROLE_MENTOR`), else `link: "mentee/path/{id}"`.
       operationId: getPathCards
       security:
         - bearerAuth: []
@@ -295,42 +210,9 @@ paths:
         - Cards
       summary: Plan cards
       description: |
-        Returns Plan Cards visible to the caller, scoped by outbound RBAC from the token.
+        Returns Plan Cards visible to the caller, scoped by outbound RBAC from the token. Each card
+        has `type: Plan` and `link: "mentor/plan/{id}"`.
       operationId: getPlanCards
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: '#/components/parameters/OffsetHeader'
-        - $ref: '#/components/parameters/SizeHeader'
-        - $ref: '#/components/parameters/NameContainsQuery'
-        - name: sort_by
-          in: query
-          required: false
-          description: Field to sort by
-          schema:
-            type: string
-            default: name
-            enum:
-              - name
-        - $ref: '#/components/parameters/OrderAscQuery'
-      responses:
-        '200':
-          $ref: '#/components/responses/CardArray'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /api/cards/products:
-    get:
-      tags:
-        - Cards
-      summary: Product cards
-      description: |
-        Returns Product Cards visible to the caller, scoped by outbound RBAC from the token.
-      operationId: getProductCards
       security:
         - bearerAuth: []
       parameters:
@@ -365,8 +247,8 @@ paths:
       description: |
         Returns Notification Cards visible to the caller. Outbound RBAC scopes the list to
         notifications targeting the token `profile_id`, `customer_id`, or `mentor_id`, plus
-        globally scoped notifications, and excludes archived documents. Notifications are ordered
-        newest first by `created.at_time`.
+        globally scoped notifications, and excludes archived documents. Each card has `type: Notification`
+        and `link: "discovery/notification/{id}"`. Notifications are ordered newest first by `created.at_time`.
       operationId: getNotificationCards
       security:
         - bearerAuth: []
@@ -402,30 +284,53 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /api/cards/settings:
+  /api/cards/events:
     get:
       tags:
         - Cards
-      summary: Settings cards
+      summary: Event cards
       description: |
-        Returns Setting Cards visible to the caller, scoped by outbound RBAC from the token.
-      operationId: getSettingsCards
+        Returns Event Cards visible to the caller, scoped by outbound RBAC from the token. Each card
+        has `type: Event`, `name` set from the event `type`, and `link: "mentee/event/{id}"`.
+      operationId: getEventCards
       security:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/OffsetHeader'
         - $ref: '#/components/parameters/SizeHeader'
-        - $ref: '#/components/parameters/NameContainsQuery'
+        - name: type
+          in: query
+          required: false
+          description: Comma-separated `in_list` filter on event type
+          schema:
+            type: string
+        - name: profile_id
+          in: query
+          required: false
+          description: Optional MongoDB ObjectId to narrow event context profile_id
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{24}$'
         - name: sort_by
           in: query
           required: false
           description: Field to sort by
           schema:
             type: string
-            default: name
+            default: created.at_time
             enum:
-              - name
-        - $ref: '#/components/parameters/OrderAscQuery'
+              - created.at_time
+              - type
+        - name: order
+          in: query
+          required: false
+          description: Sort direction
+          schema:
+            type: string
+            default: desc
+            enum:
+              - asc
+              - desc
       responses:
         '200':
           $ref: '#/components/responses/CardArray'
