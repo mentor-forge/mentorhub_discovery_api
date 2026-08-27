@@ -1,6 +1,6 @@
 # F092 – Rewrite GET /api/cards home composite
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Defect  
 **Depends On**: `F091_card_link_projection`  
 **Description**: Replace `CardService.get_home_cards` with the eight-section composite from F090. Keep every typed `/api/cards/{type}` route working so F093 can reshape that surface in one pass.
@@ -82,3 +82,23 @@ Run all commands from this API repository root.
 The agent must not update files outside this list. Do not add or remove HTTP routes. Do not edit OpenAPI.
 
 ## Execution Notes
+
+### Implementation Summary
+- Rewrote `CardService.get_home_cards` to assemble the eight-section composite in exact order:
+  1. Active Notifications for token `profile_id` (newest created first, `notification_link=False`).
+  2. Products synthetic card (`link: "admin/products"`, no `type` or `_id`) if roles contain Admin.
+  3. Discounts synthetic card (`link: "admin/discounts"`, no `type` or `_id`) if roles contain Admin.
+  4. Logs synthetic card (`link: "admin/logs"`, no `type` or `_id`) if roles contain Admin.
+  5. Customer singleton card (`link: "customer/customer/{id}"`, no `type`) if roles contain Customer and `customer_id` is present.
+  6. Member cards (`link: "customer/profile/{id}"`) sorted by `saved.at_time` desc if roles contain Customer or Coordinator and `customer_id` is present.
+  7. Mentee cards (`link: "mentee/mentee/{id}"`) sorted by `saved.at_time` desc if roles contain Mentor and `mentor_id` is present.
+  8. Learning Journey synthetic card (`link: "mentee/journey"`, no `type` or `_id`) if roles contain Mentee.
+- Added `_customer_home_card` helper using MongoIO list query with outbound match.
+- Added comprehensive unit tests in `test/services/test_card_service.py` covering all eight sections, role gates, sorts, and pagination.
+
+### Verification Results
+- `pipenv run format && pipenv run lint && pipenv run test`: 151 passed in 0.26s, lint clean.
+- `pipenv run build`: passed cleanly.
+- `pipenv run container && pipenv run api`: image built and service running.
+- `pipenv run e2e`: 58 passed in 0.31s.
+- `curl -s http://localhost:8397/docs/openapi.yaml`: served spec unchanged.

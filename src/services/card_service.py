@@ -26,6 +26,7 @@ from api_utils.mongo_utils.list_query import (
     execute_list_query,
     validate_pagination,
 )
+from api_utils.services.profile_service import PROFILE_LIST_ORDER
 from api_utils.services.rbac import EMPTY_SCOPE_MATCH, build_outbound_match
 
 from src.services.notification_service import NotificationService
@@ -156,6 +157,8 @@ class CardService:
                 card["link"] = f"customer/profile/{id_str}"
             elif card_type in (CARD_TYPE_MENTEE, CARD_TYPE_MENTEES):
                 card["link"] = f"mentee/mentee/{id_str}"
+            elif card_type == CARD_TYPE_CUSTOMER:
+                card["link"] = f"customer/customer/{id_str}"
             elif card_type == CARD_TYPE_RESOURCES:
                 prefix = "mentor" if config.ROLE_MENTOR in roles else "mentee"
                 card["link"] = f"{prefix}/resource/{id_str}"
@@ -192,18 +195,42 @@ class CardService:
         ]
 
     @classmethod
+    def _customer_home_card(cls, token, breadcrumb):
+        """Fetch the caller's Customer document and project it as a Customer card."""
+        config = Config.get_instance()
+        customer_id = token.get("customer_id")
+        if not customer_id:
+            return None
+        match = cls._customer_match(token)
+        customers = execute_list_query(
+            config.CUSTOMER_COLLECTION_NAME,
+            match=match,
+            sort_by=[("name", 1)],
+            offset=0,
+            size=1,
+        )
+        if customers:
+            return cls.project(CARD_TYPE_CUSTOMER, customers[0], token=token)
+        return None
+
+    @classmethod
     def get_home_cards(
         cls, token, breadcrumb, offset=DEFAULT_OFFSET, size=DEFAULT_SIZE
     ):
         """
         Build the composite home Card list for the caller.
 
-        Sections are concatenated in a fixed order — active Notifications for
-        the token `profile_id`, Members for the token `customer_id` (Customer or
-        Coordinator roles only), then Mentees for the token `mentor_id` (Mentor
-        role only) — and `offset`/`size` apply to the combined list. Each
-        section is fetched from the start and capped at the shared page ceiling
-        so the combined slice is complete for the requested page.
+        Sections are assembled in the documented order:
+        1. Active Notifications for token `profile_id` (newest created first)
+        2. Admin synthetic: Products
+        3. Admin synthetic: Discounts
+        4. Admin synthetic: Logs
+        5. Customer singleton for token `customer_id` (Customer role only)
+        6. Members for token `customer_id` (Customer or Coordinator roles only, newest saved first)
+        7. Mentees for token `mentor_id` (Mentor role only, newest saved first)
+        8. Mentee synthetic: Learning Journey
+
+        `offset`/`size` apply to the combined list.
 
         Args:
             token: Authentication token
@@ -222,6 +249,7 @@ class CardService:
 
         cards = []
 
+        # 1. Active Notifications for token profile_id
         profile_id = token.get("profile_id")
         if profile_id:
             notifications = NotificationService.get_active_notifications(
@@ -240,20 +268,72 @@ class CardService:
                 )
             )
 
+        # 2-4. Admin synthetic cards
+        if config.ROLE_ADMIN in roles:
+            cards.append(
+                {
+                    "name": "Products",
+                    "description": "Manage subscription products",
+                    "link": "admin/products",
+                }
+            )
+            cards.append(
+                {
+                    "name": "Discounts",
+                    "description": "Manage discount codes",
+                    "link": "admin/discounts",
+                }
+            )
+            cards.append(
+                {
+                    "name": "Logs",
+                    "description": "View system logs",
+                    "link": "admin/logs",
+                }
+            )
+
+        # 5. Customer card for token customer_id
+        if config.ROLE_CUSTOMER in roles and token.get("customer_id"):
+            customer_card = cls._customer_home_card(token, breadcrumb)
+            if customer_card:
+                cards.append(customer_card)
+
+        # 6. Member cards for Profiles with token customer_id, saved.at_time desc
         is_member_reader = (
             config.ROLE_CUSTOMER in roles or config.ROLE_COORDINATOR in roles
         )
         if token.get("customer_id") and is_member_reader:
+            saved_desc = build_sort_by("saved.at_time", "desc", PROFILE_LIST_ORDER)
             members = ProfileService.get_member_profiles(
-                token, breadcrumb, offset=0, size=section_size
+                token,
+                breadcrumb,
+                offset=0,
+                size=section_size,
+                sort_by=saved_desc,
             )
             cards.extend(cls.project_all(CARD_TYPE_MEMBERS, members, token=token))
 
+        # 7. Mentee cards for Profiles with token mentor_id, saved.at_time desc
         if token.get("mentor_id") and config.ROLE_MENTOR in roles:
+            saved_desc = build_sort_by("saved.at_time", "desc", PROFILE_LIST_ORDER)
             mentees = ProfileService.get_mentee_profiles(
-                token, breadcrumb, offset=0, size=section_size
+                token,
+                breadcrumb,
+                offset=0,
+                size=section_size,
+                sort_by=saved_desc,
             )
             cards.extend(cls.project_all(CARD_TYPE_MENTEES, mentees, token=token))
+
+        # 8. Mentee synthetic card (Learning Journey)
+        if config.ROLE_MENTEE in roles:
+            cards.append(
+                {
+                    "name": "Learning Journey",
+                    "description": "Continue your learning journey",
+                    "link": "mentee/journey",
+                }
+            )
 
         page = cards[offset : offset + size]
         logger.info(
