@@ -25,6 +25,42 @@ _E2E_ROLES = ("admin",)
 # needs one. Matches the seeded admin Profile id (Profile.0.1.0.0 test data).
 _E2E_PROFILE_ID = "A00000000000000000000001"
 
+# Developer Edition seed persona configurations
+PERSONA_MIKE = {
+    "sub": "mike",
+    "profile_id": "A00000000000000000000001",
+    "roles": ["admin"],
+}
+
+PERSONA_DANIEL = {
+    "sub": "daniel",
+    "profile_id": "A00000000000000000000002",
+    "roles": ["mentee"],
+    "customer_id": "D00000000000000000000002",
+    "mentor_id": "A00000000000000000000010",
+}
+
+PERSONA_STACEY = {
+    "sub": "stacey",
+    "profile_id": "A00000000000000000000008",
+    "roles": ["customer"],
+    "customer_id": "D00000000000000000000002",
+}
+
+PERSONA_EMMA = {
+    "sub": "emma",
+    "profile_id": "A00000000000000000000007",
+    "roles": ["coordinator"],
+    "customer_id": "D00000000000000000000002",
+}
+
+PERSONA_PAULA = {
+    "sub": "paula",
+    "profile_id": "A00000000000000000000010",
+    "roles": ["mentor"],
+    "mentor_id": "A00000000000000000000010",
+}
+
 
 def get_auth_token(**claims) -> str:
     """
@@ -53,3 +89,10 @@ def get_auth_token(**claims) -> str:
     if isinstance(token, bytes):
         return token.decode("ascii")
     return token
+
+
+def get_persona_token(persona: dict, **extra) -> str:
+    """Mint a JWT for one of the Developer Edition seed personas."""
+    claims = dict(persona)
+    claims.update(extra)
+    return get_auth_token(**claims)

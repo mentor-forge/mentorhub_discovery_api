@@ -49,13 +49,14 @@ pipenv run lint
 - `src/` - Main package containing:
   - `server.py` - API entrypoint and blueprint registration
   - `routes/` - HTTP request/response handlers
-    - `card_routes.py` - composite home list plus the Customer, Product, and Setting typed lists
+    - `card_routes.py` - composite home list
     - `notification_routes.py` - Notification create, dismiss, and cancel
   - `services/` - Business logic and RBAC for collections this API controls
-    - `card_service.py` - home aggregation and the Card projections with no shared service class
+    - `card_service.py` - home composite aggregation and Card projections
+    - `event_service.py` - Event consume surface and Card-projecting subclass
     - `notification_service.py` - Notification control rules and the Card-projecting subclass
     - `path_service.py`, `plan_service.py`, `profile_service.py`, `resource_service.py` -
-      Card-projecting subclasses bound to the shared `api-utils` GET factories
+      Domain services and Card-projecting subclasses bound to the shared `api-utils` GET factories
 
 - `test/` - Test suite with matching directory structure:
   - `routes/` - Route unit tests
@@ -81,7 +82,7 @@ See the [Open API Specifications](./docs/openapi.yaml) for details on the API.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/cards` | Composite home card list |
-| `GET /api/cards/{type}` | Typed card list — `customer`, `members`, `mentees`, `notifications`, `paths`, `plans`, `products`, `resources`, `settings` |
+| `GET /api/cards/{type}` | Typed card list — `events`, `notifications`, `paths`, `plans`, `resources` |
 | `POST /api/notification` | Create a Notification |
 | `POST /api/notification/dismiss/{notification_id}` | Dismiss a Notification |
 | `POST /api/notification/cancel/{notification_id}` | Cancel a Notification |
@@ -106,7 +107,7 @@ curl http://localhost:8397/api/config \
 curl http://localhost:8397/api/cards \
   -H "Authorization: Bearer $TOKEN"
 
-# Get a typed card list (first page of 5)
+# Get a typed card list (first page of 5; supports resources, paths, plans, notifications, events)
 curl http://localhost:8397/api/cards/resources \
   -H "Authorization: Bearer $TOKEN" \
   -H "offset: 0" -H "size: 5"

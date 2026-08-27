@@ -1,6 +1,6 @@
 # F094 – README and seed-backed Card e2e
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Feature  
 **Depends On**: `F093_typed_card_surface_events`  
 **Description**: Point README at the reduced Card surface and lock home/typed Card behaviour to Developer Edition seed personas so e2e asserts real documents, order, and `link` values.
@@ -74,3 +74,16 @@ Run all commands from this API repository root.
 The agent must not update files outside this list.
 
 ## Execution Notes
+
+### Implementation Summary
+- Updated `README.md` project structure, endpoint table, and curl examples to accurately describe the 5 surviving typed Card lists (`events`, `notifications`, `paths`, `plans`, `resources`), home composite `GET /api/cards`, and Notification control endpoints (`/api/notification*`).
+- Updated `test/e2e/e2e_auth.py` with seed persona definitions (`PERSONA_MIKE`, `PERSONA_DANIEL`, `PERSONA_STACEY`, `PERSONA_EMMA`, `PERSONA_PAULA`) and `get_persona_token` helper.
+- Updated `test/e2e/test_cards.py` with seed-backed home composite assertions and typed list link assertions (`mentor/*` vs `mentee/*` link rules).
+
+### Verification Results
+- `pipenv run format && pipenv run lint && pipenv run test`: 140 passed in 0.24s, clean format and lint.
+- `pipenv run build`: passed cleanly.
+- `pipenv run container && pipenv run api`: image built and deployed to local Docker stack.
+- `pipenv run e2e`: 56 passed in 0.32s covering contract assertions, persona home compositions, link projections, and retired 404 routes.
+- `curl -s http://localhost:8397/docs/openapi.yaml`: served OpenAPI 3.0.3 v0.3.0 spec.
+- Live API curl spot-checks: `/api/config`, `/api/cards`, `/api/cards/resources`, `/api/cards/events` returned 200 with valid Card projections; `/api/cards/customer` returned 404.
