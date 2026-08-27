@@ -15,25 +15,24 @@ from unittest.mock import MagicMock, patch
 from bson import ObjectId
 
 from api_utils.flask_utils.exceptions import HTTPBadRequest
+from src.services.event_service import EventCardService
 from src.services.notification_service import (
     NotificationCardService,
     NotificationService,
 )
 from src.services.path_service import PathCardService
 from src.services.plan_service import PlanCardService
-from src.services.profile_service import MemberCardService, MenteeCardService
 from src.services.resource_service import ResourceCardService
 from src.services.card_service import (
     CARD_TYPE_CUSTOMER,
+    CARD_TYPE_EVENT,
+    CARD_TYPE_EVENTS,
     CARD_TYPE_MEMBERS,
     CARD_TYPE_MENTEES,
     CARD_TYPE_NOTIFICATIONS,
     CARD_TYPE_PATHS,
     CARD_TYPE_PLANS,
-    CARD_TYPE_PRODUCTS,
     CARD_TYPE_RESOURCES,
-    CARD_TYPE_SETTINGS,
-    SETTING_TYPE_PRODUCT,
     CardService,
 )
 
@@ -215,8 +214,27 @@ class TestProject(unittest.TestCase):
         )
         self.assertEqual(card_typed["link"], f"discovery/notification/{source_id}")
 
+    def test_project_event(self):
+        source_id = ObjectId()
+        source = {
+            "_id": source_id,
+            "type": "login",
+            "context": {"profile_id": PROFILE_ID},
+            "created": BREADCRUMB,
+        }
+
+        card = CardService.project(CARD_TYPE_EVENTS, source)
+
+        self.assertEqual(card["_id"], source_id)
+        self.assertEqual(card["name"], "login")
+        self.assertEqual(card["type"], "Event")
+        self.assertEqual(card["link"], f"mentee/event/{source_id}")
+        self.assertNotIn("context", card)
+        self.assertNotIn("created", card)
+
     def test_project_typed_sources_use_enum_values(self):
         expected = {
+            CARD_TYPE_EVENTS: "Event",
             CARD_TYPE_MEMBERS: "Member",
             CARD_TYPE_MENTEES: "Mentee",
             CARD_TYPE_NOTIFICATIONS: "Notification",
@@ -227,16 +245,16 @@ class TestProject(unittest.TestCase):
 
         for card_type, enum_value in expected.items():
             with self.subTest(card_type=card_type):
-                card = CardService.project(card_type, {"_id": ObjectId(), "name": "n"})
+                card = CardService.project(
+                    card_type, {"_id": ObjectId(), "name": "n", "type": "n"}
+                )
                 self.assertEqual(card["type"], enum_value)
                 self.assertIn(card["type"], CARD_TYPE_ENUM)
 
     def test_project_omits_type_for_sources_without_enum_value(self):
-        for card_type in (CARD_TYPE_CUSTOMER, CARD_TYPE_PRODUCTS, CARD_TYPE_SETTINGS):
-            with self.subTest(card_type=card_type):
-                card = CardService.project(card_type, {"_id": ObjectId(), "name": "n"})
-                self.assertNotIn("type", card)
-                self.assertTrue(set(card).issubset(CARD_PROPERTIES))
+        card = CardService.project(CARD_TYPE_CUSTOMER, {"_id": ObjectId(), "name": "n"})
+        self.assertNotIn("type", card)
+        self.assertTrue(set(card).issubset(CARD_PROPERTIES))
 
     def test_project_unknown_type_raises_bad_request(self):
         with self.assertRaises(HTTPBadRequest):
@@ -575,88 +593,6 @@ class TestHomeCardComposition(HomeCardsTestCase):
             CardService.get_home_cards(self.token, BREADCRUMB, offset=0, size=101)
 
 
-class TypedCardListTestCase(unittest.TestCase):
-    """Customer / Product / Setting lists have no shared service class."""
-
-    def setUp(self):
-        self.config = mock_config()
-
-        config_patcher = patch(
-            "src.services.card_service.Config.get_instance", return_value=self.config
-        )
-        query_patcher = patch("src.services.card_service.execute_list_query")
-
-        self.addCleanup(config_patcher.stop)
-        self.addCleanup(query_patcher.stop)
-
-        config_patcher.start()
-        self.mock_query = query_patcher.start()
-        self.mock_query.return_value = documents("row", 2)
-
-
-class TestCustomerCards(TypedCardListTestCase):
-    def test_reads_the_customer_collection(self):
-        CardService.get_customer_cards(
-            token(roles=["customer"], customer_id=CUSTOMER_ID), BREADCRUMB
-        )
-
-        args, _ = self.mock_query.call_args
-        self.assertEqual(args, ("Customer",))
-
-    def test_projects_customer_cards_without_a_type(self):
-        cards = CardService.get_customer_cards(
-            token(roles=["customer"], customer_id=CUSTOMER_ID), BREADCRUMB
-        )
-
-        self.assertEqual(len(cards), 2)
-        for card in cards:
-            self.assertNotIn("type", card)
-            self.assertTrue(set(card).issubset(CARD_PROPERTIES))
-
-    def test_scopes_a_caller_without_a_customer_id_to_nothing(self):
-        CardService.get_customer_cards(token(roles=["mentee"]), BREADCRUMB)
-
-        _, kwargs = self.mock_query.call_args
-        self.assertEqual(kwargs["match"]["_id"], {"$in": []})
-
-
-class TestProductCards(TypedCardListTestCase):
-    def test_reads_the_setting_collection_filtered_to_products(self):
-        CardService.get_product_cards(token(roles=["customer"]), BREADCRUMB)
-
-        args, kwargs = self.mock_query.call_args
-        self.assertEqual(args, ("Setting",))
-        self.assertEqual(kwargs["match"].get("type"), SETTING_TYPE_PRODUCT)
-
-    def test_product_discriminator_survives_the_admin_outbound_scope(self):
-        CardService.get_product_cards(token(roles=["admin"]), BREADCRUMB)
-
-        _, kwargs = self.mock_query.call_args
-        self.assertEqual(kwargs["match"], {"type": SETTING_TYPE_PRODUCT})
-
-    def test_projects_product_cards_without_a_type(self):
-        cards = CardService.get_product_cards(token(roles=["customer"]), BREADCRUMB)
-
-        for card in cards:
-            self.assertNotIn("type", card)
-
-
-class TestSettingsCards(TypedCardListTestCase):
-    def test_reads_every_setting_variant(self):
-        CardService.get_settings_cards(token(roles=["customer"]), BREADCRUMB)
-
-        args, kwargs = self.mock_query.call_args
-        self.assertEqual(args, ("Setting",))
-        self.assertNotIn("type", kwargs["match"])
-
-    def test_projects_settings_cards_without_a_type(self):
-        cards = CardService.get_settings_cards(token(roles=["customer"]), BREADCRUMB)
-
-        self.assertEqual(len(cards), 2)
-        for card in cards:
-            self.assertNotIn("type", card)
-
-
 # (Card subclass, list method, patched source, expected Card type). The source
 # is patched one level up the MRO, so each test covers the projection only.
 CARD_SUBCLASS_LISTS = [
@@ -679,16 +615,10 @@ CARD_SUBCLASS_LISTS = [
         "Plan",
     ),
     (
-        MemberCardService,
-        "get_profiles",
-        "src.services.profile_service.ProfileService.get_member_profiles",
-        "Member",
-    ),
-    (
-        MenteeCardService,
-        "get_profiles",
-        "src.services.profile_service.ProfileService.get_mentee_profiles",
-        "Mentee",
+        EventCardService,
+        "get_events",
+        "api_utils.services.event_service.EventService.get_events",
+        "Event",
     ),
 ]
 
@@ -698,8 +628,7 @@ CARD_SUBCLASS_BY_ID_GETTERS = [
     (ResourceCardService, "get_resource"),
     (PathCardService, "get_path"),
     (PlanCardService, "get_plan"),
-    (MemberCardService, "get_profile"),
-    (MenteeCardService, "get_profile"),
+    (EventCardService, "get_event"),
 ]
 
 
@@ -727,8 +656,13 @@ class TestCardProjectingSubclasses(unittest.TestCase):
                         token(), BREADCRUMB, 5, 10, {"name": "a"}, sort_by
                     )
 
-                args, _ = mock_source.call_args
-                self.assertEqual(args[-4:], (5, 10, {"name": "a"}, sort_by))
+                args, kwargs = mock_source.call_args
+                pagination = args[2:4] or (kwargs.get("offset"), kwargs.get("size"))
+                self.assertEqual(tuple(pagination), (5, 10))
+                passed_filters = args[4] if len(args) > 4 else kwargs.get("filters")
+                self.assertEqual(passed_filters, {"name": "a"})
+                passed_sort = args[5] if len(args) > 5 else kwargs.get("sort_by")
+                self.assertEqual(passed_sort, sort_by)
 
     def test_subclasses_do_not_project_a_single_document(self):
         """Card by-id GETs are suppressed, so no subclass overrides a by-id read."""

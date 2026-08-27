@@ -20,8 +20,6 @@ from api_utils.mongo_utils.list_query import (
     DEFAULT_OFFSET,
     DEFAULT_SIZE,
     MAX_SIZE,
-    and_match,
-    build_match_filter,
     build_sort_by,
     execute_list_query,
     validate_pagination,
@@ -36,10 +34,9 @@ logger = logging.getLogger(__name__)
 
 ARCHIVED_STATUS = "archived"
 
-# Setting is a polymorphic bag; `type` selects the Product catalog variant.
-SETTING_TYPE_PRODUCT = "Product"
-
 CARD_TYPE_CUSTOMER = "customer"
+CARD_TYPE_EVENT = "event"
+CARD_TYPE_EVENTS = "events"
 CARD_TYPE_MEMBER = "member"
 CARD_TYPE_MEMBERS = "members"
 CARD_TYPE_MENTEE = "mentee"
@@ -48,21 +45,22 @@ CARD_TYPE_NOTIFICATION = "notification"
 CARD_TYPE_NOTIFICATIONS = "notifications"
 CARD_TYPE_PATHS = "paths"
 CARD_TYPE_PLANS = "plans"
-CARD_TYPE_PRODUCTS = "products"
 CARD_TYPE_RESOURCES = "resources"
-CARD_TYPE_SETTINGS = "settings"
 
 # Card field -> ordered source field candidates; the first present value wins.
 _NAMED_FIELDS = {"name": ("name",), "description": ("description",)}
 _PROFILE_FIELDS = {"name": ("full_name", "name"), "description": ("description",)}
 _NOTIFICATION_FIELDS = {"name": ("name",), "description": ("message",)}
+_EVENT_FIELDS = {"name": ("type",), "description": ("description",)}
 
 # `type` is optional in the Card schema and its enum is
-# Event | Member | Mentee | Notification | Path | Plan | Resource. Customer,
-# Product, and Setting sources have no enum value, so their cards omit `type`
-# rather than emit a value the schema rejects.
+# Event | Member | Mentee | Notification | Path | Plan | Resource. Customer
+# source has no enum value, so its card omits `type` rather than emit a value
+# the schema rejects.
 CARD_TYPE_SPECS = {
     CARD_TYPE_CUSTOMER: {"type": None, "fields": _NAMED_FIELDS},
+    CARD_TYPE_EVENT: {"type": "Event", "fields": _EVENT_FIELDS},
+    CARD_TYPE_EVENTS: {"type": "Event", "fields": _EVENT_FIELDS},
     CARD_TYPE_MEMBER: {"type": "Member", "fields": _PROFILE_FIELDS},
     CARD_TYPE_MEMBERS: {"type": "Member", "fields": _PROFILE_FIELDS},
     CARD_TYPE_MENTEE: {"type": "Mentee", "fields": _PROFILE_FIELDS},
@@ -71,24 +69,8 @@ CARD_TYPE_SPECS = {
     CARD_TYPE_NOTIFICATIONS: {"type": "Notification", "fields": _NOTIFICATION_FIELDS},
     CARD_TYPE_PATHS: {"type": "Path", "fields": _NAMED_FIELDS},
     CARD_TYPE_PLANS: {"type": "Plan", "fields": _NAMED_FIELDS},
-    CARD_TYPE_PRODUCTS: {"type": None, "fields": _NAMED_FIELDS},
     CARD_TYPE_RESOURCES: {"type": "Resource", "fields": _NAMED_FIELDS},
-    CARD_TYPE_SETTINGS: {"type": None, "fields": _NAMED_FIELDS},
 }
-
-# Filter and order specs for the collections with no shared service class.
-NAME_LIST_FILTERS = {"name": {"type": "contains", "field": "name"}}
-NAME_LIST_ORDER = {
-    "default": {"field": "name", "order": "asc"},
-    "allowed": {"name": ("asc", "desc")},
-}
-
-CUSTOMER_LIST_FILTERS = NAME_LIST_FILTERS
-CUSTOMER_LIST_ORDER = NAME_LIST_ORDER
-PRODUCT_LIST_FILTERS = NAME_LIST_FILTERS
-PRODUCT_LIST_ORDER = NAME_LIST_ORDER
-SETTING_LIST_FILTERS = NAME_LIST_FILTERS
-SETTING_LIST_ORDER = NAME_LIST_ORDER
 
 
 class CardService:
@@ -98,8 +80,6 @@ class CardService:
     Handles:
     - Projecting a source document onto the Card schema
     - Assembling the composite home Card list from the local services
-    - Typed Card lists for Customer, Product, and Setting, which have no
-      shared service class of their own
     """
 
     @classmethod
@@ -157,6 +137,8 @@ class CardService:
                 card["link"] = f"customer/profile/{id_str}"
             elif card_type in (CARD_TYPE_MENTEE, CARD_TYPE_MENTEES):
                 card["link"] = f"mentee/mentee/{id_str}"
+            elif card_type in (CARD_TYPE_EVENT, CARD_TYPE_EVENTS):
+                card["link"] = f"mentee/event/{id_str}"
             elif card_type == CARD_TYPE_CUSTOMER:
                 card["link"] = f"customer/customer/{id_str}"
             elif card_type == CARD_TYPE_RESOURCES:
@@ -353,148 +335,4 @@ class CardService:
             identity = EMPTY_SCOPE_MATCH
         return build_outbound_match(
             token, [{"status": {"$ne": ARCHIVED_STATUS}}, identity]
-        )
-
-    @classmethod
-    def _setting_match(cls, token):
-        """Outbound scope for Setting: catalog consume, nothing archived."""
-        return build_outbound_match(token, [{"status": {"$ne": ARCHIVED_STATUS}}])
-
-    @classmethod
-    def _list_cards(
-        cls, card_type, collection_name, match, order_spec, offset, size, sort_by
-    ):
-        if sort_by is None:
-            default = order_spec["default"]
-            sort_by = build_sort_by(default["field"], default["order"], order_spec)
-
-        documents = execute_list_query(
-            collection_name,
-            match=match,
-            sort_by=sort_by,
-            offset=offset,
-            size=size,
-        )
-        return cls.project_all(card_type, documents)
-
-    @classmethod
-    def get_customer_cards(
-        cls,
-        token,
-        breadcrumb,
-        offset=DEFAULT_OFFSET,
-        size=DEFAULT_SIZE,
-        filters=None,
-        sort_by=None,
-    ):
-        """
-        Get Customer Cards visible to the caller.
-
-        Args:
-            token: Authentication token
-            breadcrumb: Audit breadcrumb
-            offset: Zero-based start index
-            size: Number of cards to return
-            filters: Parsed filter dict from parse_filter_params
-            sort_by: PyMongo sort list from build_sort_by; default name asc
-
-        Returns:
-            list: Card projections of Customer documents
-        """
-        config = Config.get_instance()
-        match = build_match_filter(
-            cls._customer_match(token), filters or {}, CUSTOMER_LIST_FILTERS
-        )
-        return cls._list_cards(
-            CARD_TYPE_CUSTOMER,
-            config.CUSTOMER_COLLECTION_NAME,
-            match,
-            CUSTOMER_LIST_ORDER,
-            offset,
-            size,
-            sort_by,
-        )
-
-    @classmethod
-    def get_product_cards(
-        cls,
-        token,
-        breadcrumb,
-        offset=DEFAULT_OFFSET,
-        size=DEFAULT_SIZE,
-        filters=None,
-        sort_by=None,
-    ):
-        """
-        Get Product Cards visible to the caller.
-
-        Product is not a collection of its own: it is the `Product` variant of
-        the polymorphic Setting collection, so the discriminator is AND'd on
-        outside the outbound match (an admin's unrestricted scope must still
-        exclude Discount rows).
-
-        Args:
-            token: Authentication token
-            breadcrumb: Audit breadcrumb
-            offset: Zero-based start index
-            size: Number of cards to return
-            filters: Parsed filter dict from parse_filter_params
-            sort_by: PyMongo sort list from build_sort_by; default name asc
-
-        Returns:
-            list: Card projections of Product Setting documents
-        """
-        config = Config.get_instance()
-        match = and_match(
-            {"type": SETTING_TYPE_PRODUCT},
-            build_match_filter(
-                cls._setting_match(token), filters or {}, PRODUCT_LIST_FILTERS
-            ),
-        )
-        return cls._list_cards(
-            CARD_TYPE_PRODUCTS,
-            config.SETTING_COLLECTION_NAME,
-            match,
-            PRODUCT_LIST_ORDER,
-            offset,
-            size,
-            sort_by,
-        )
-
-    @classmethod
-    def get_settings_cards(
-        cls,
-        token,
-        breadcrumb,
-        offset=DEFAULT_OFFSET,
-        size=DEFAULT_SIZE,
-        filters=None,
-        sort_by=None,
-    ):
-        """
-        Get Setting Cards visible to the caller across every Setting variant.
-
-        Args:
-            token: Authentication token
-            breadcrumb: Audit breadcrumb
-            offset: Zero-based start index
-            size: Number of cards to return
-            filters: Parsed filter dict from parse_filter_params
-            sort_by: PyMongo sort list from build_sort_by; default name asc
-
-        Returns:
-            list: Card projections of Setting documents
-        """
-        config = Config.get_instance()
-        match = build_match_filter(
-            cls._setting_match(token), filters or {}, SETTING_LIST_FILTERS
-        )
-        return cls._list_cards(
-            CARD_TYPE_SETTINGS,
-            config.SETTING_COLLECTION_NAME,
-            match,
-            SETTING_LIST_ORDER,
-            offset,
-            size,
-            sort_by,
         )

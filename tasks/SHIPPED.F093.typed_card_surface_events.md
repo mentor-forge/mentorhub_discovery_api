@@ -1,6 +1,6 @@
 # F093 – Retire doomed typed Card lists and add GET /api/cards/events
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Feature  
 **Depends On**: `F092_home_cards_composite`  
 **Description**: After home carries Customer / Member / Mentee / Admin / Journey cards, delete the doomed typed Card routes and register `GET /api/cards/events` in the same pass so `server.py` and URL-map tests are edited once.
@@ -76,18 +76,35 @@ Run all commands from this API repository root.
 
 ## Outputs
 
-- `src/server.py` — unregister doomed typed blueprints; register `/api/cards/events`
-- `src/routes/card_routes.py` — delete customer/products/settings factories if unused
-- `src/services/event_service.py` — create (`EventService` + `EventCardService`)
-- `src/services/__init__.py` — export Event service if the package exports others
-- `src/services/card_service.py` — Event `CARD_TYPE_*` spec; remove unused Customer/Product/Setting list helpers
-- `src/services/profile_service.py` — remove `MemberCardService` / `MenteeCardService` if unused; keep scoped Profile list helpers
-- `test/test_server.py`
-- `test/routes/test_card_routes.py`
+- `src/services/event_service.py` [NEW]
+- `src/services/__init__.py`
+- `src/services/card_service.py`
+- `src/services/profile_service.py`
+- `src/routes/card_routes.py`
+- `src/server.py`
+- `test/services/test_event_service.py` [NEW]
 - `test/services/test_card_service.py`
-- `test/services/test_event_service.py` — create if needed
-- `test/e2e/test_cards.py` — typed path set + doomed 404 + events list
+- `test/routes/test_card_routes.py`
+- `test/test_server.py`
+- `test/e2e/test_cards.py`
 
 The agent must not update files outside this list. Do not edit OpenAPI (already done in F090). README is F094.
 
 ## Execution Notes
+
+### Implementation Summary
+- Created `src/services/event_service.py` with `EventService` and `EventCardService` projecting Event documents to Card schema with `type: Event`, `name: event["type"]`, and `link: "mentee/event/{id}"`.
+- Exported `EventService` from `src/services/__init__.py`.
+- Added Event card specifications and link projections in `src/services/card_service.py`.
+- Removed retired list helpers and specifications for Product, Setting, Customer lists from `src/services/card_service.py` (kept Customer card projection for home composite singleton).
+- Removed `MemberCardService` and `MenteeCardService` from `src/services/profile_service.py`.
+- Cleaned up local typed card route factories from `src/routes/card_routes.py`.
+- Registered `GET /api/cards/events` in `src/server.py` and unmounted doomed blueprints (`/api/cards/customer`, `/api/cards/products`, `/api/cards/settings`, `/api/cards/members`, `/api/cards/mentees`).
+- Created `test/services/test_event_service.py` and updated unit tests in `test/services/test_card_service.py`, `test/routes/test_card_routes.py`, `test/test_server.py`, and `test/e2e/test_cards.py`.
+
+### Verification Results
+- `pipenv run format && pipenv run lint && pipenv run test`: 140 passed in 0.23s, clean format and lint.
+- `pipenv run build`: passed cleanly.
+- `pipenv run container && pipenv run api`: image built and service running.
+- `pipenv run e2e`: 47 passed in 0.27s (doomed routes verified 404, `/api/cards/events` verified 200 + Event cards).
+- `curl -s http://localhost:8397/docs/openapi.yaml`: served spec matching F090.

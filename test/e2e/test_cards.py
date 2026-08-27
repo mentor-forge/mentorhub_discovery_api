@@ -3,10 +3,7 @@ E2E tests for the Card endpoints (consume-style, read-only).
 
 These tests verify the GET /api/cards endpoints against a running server by
 making actual HTTP requests. An empty array is a valid Card list, so the
-assertions cover the contract — status, array body, Card shape. The two
-identity-scoped lists (Member, Mentee) borrow the same signing settings with
-claim overrides so their projection is exercised too; a projection test still
-skips if the persona has no seeded documents behind it.
+assertions cover the contract — status, array body, Card shape.
 
 To run these tests:
 1. Start the server: pipenv run dev (or pipenv run api for containerized)
@@ -41,22 +38,24 @@ NOTIFIED_PROFILE_ID = "A00000000000000000000002"
 NOTIFIED_PROFILE_ROLES = ["mentee"]
 
 TYPED_CARD_PATHS = [
-    "/api/cards/customer",
-    "/api/cards/members",
-    "/api/cards/mentees",
+    "/api/cards/events",
     "/api/cards/notifications",
     "/api/cards/paths",
     "/api/cards/plans",
-    "/api/cards/products",
     "/api/cards/resources",
+]
+
+DOOMED_CARD_PATHS = [
+    "/api/cards/customer",
+    "/api/cards/members",
+    "/api/cards/mentees",
+    "/api/cards/products",
     "/api/cards/settings",
 ]
 
 # Typed lists whose shared api-utils GET factory also mounts a GET by-id rule.
 # The Card contract is list-only, so those URLs must not be routed.
 LIST_ONLY_SHARED_CARD_PATHS = [
-    "/api/cards/members",
-    "/api/cards/mentees",
     "/api/cards/paths",
     "/api/cards/plans",
     "/api/cards/resources",
@@ -65,25 +64,9 @@ LIST_ONLY_SHARED_CARD_PATHS = [
 # Well-formed ObjectId; the URL is unrouted, so it never reaches a query.
 CARD_ID = "665f1c2a9b1e4c0a1b2c3d21"
 
-# Typed lists whose source has no Card `type` enum value.
-UNTYPED_CARD_PATHS = {
-    "/api/cards/customer",
-    "/api/cards/products",
-    "/api/cards/settings",
-}
-
-# The Member list is the token `customer_id` scope and the Mentee list is the
-# token `mentor_id` scope, so those two paths need a persona that owns some.
-# Both values are seeded Developer Edition ids (Profile.0.1.0.0 test data).
-SCOPED_CARD_CLAIMS = {
-    "/api/cards/members": {"customer_id": "D00000000000000000000002"},
-    "/api/cards/mentees": {"mentor_id": "A00000000000000000000010"},
-}
-
 # Path segment -> Card `type` the list projects.
 TYPED_CARD_TYPES = {
-    "/api/cards/members": "Member",
-    "/api/cards/mentees": "Mentee",
+    "/api/cards/events": "Event",
     "/api/cards/notifications": "Notification",
     "/api/cards/paths": "Path",
     "/api/cards/plans": "Plan",
@@ -101,12 +84,6 @@ def _auth_headers(token=None, **extra):
     headers = {"Authorization": f"Bearer {token or get_auth_token()}"}
     headers.update(extra)
     return headers
-
-
-def _scoped_token(path):
-    """Token carrying the identity claim a typed list scopes on, if it needs one."""
-    claims = SCOPED_CARD_CLAIMS.get(path)
-    return get_auth_token(**claims) if claims else None
 
 
 def _assert_card_shape(cards):
@@ -196,6 +173,14 @@ def test_typed_card_list_requires_auth(path):
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize("path", DOOMED_CARD_PATHS)
+def test_doomed_typed_card_list_is_not_routed(path):
+    """Test doomed typed card routes were retired and return 404."""
+    response = requests.get(f"{BASE_URL}{path}", headers=_auth_headers())
+    assert response.status_code == 404, _err(response, 404)
+
+
+@pytest.mark.e2e
 @pytest.mark.parametrize("path", LIST_ONLY_SHARED_CARD_PATHS)
 def test_typed_card_by_id_is_not_routed(path):
     """Test a by-id Card URL 404s for an authenticated caller."""
@@ -215,9 +200,7 @@ def test_typed_card_by_id_is_not_routed_without_auth(path):
 @pytest.mark.parametrize("path,card_type", sorted(TYPED_CARD_TYPES.items()))
 def test_typed_card_list_projects_its_card_type(path, card_type):
     """Test a typed list stamps every card with its own Card type."""
-    response = requests.get(
-        f"{BASE_URL}{path}", headers=_auth_headers(_scoped_token(path))
-    )
+    response = requests.get(f"{BASE_URL}{path}", headers=_auth_headers())
     assert response.status_code == 200, _err(response, 200)
 
     cards = response.json()
@@ -226,19 +209,6 @@ def test_typed_card_list_projects_its_card_type(path, card_type):
     assert all(
         card.get("type") == card_type for card in cards
     ), f"Expected every card to be {card_type}, got {cards}"
-
-
-@pytest.mark.e2e
-@pytest.mark.parametrize("path", sorted(UNTYPED_CARD_PATHS))
-def test_untyped_card_list_omits_the_card_type(path):
-    """Test Customer, Product, and Setting cards omit the Card type enum."""
-    response = requests.get(f"{BASE_URL}{path}", headers=_auth_headers())
-    assert response.status_code == 200, _err(response, 200)
-
-    cards = response.json()
-    if not cards:
-        pytest.skip(f"no seeded documents behind {path} for the persona")
-    assert all("type" not in card for card in cards), f"Expected no Card type: {cards}"
 
 
 @pytest.mark.e2e
@@ -255,7 +225,7 @@ def test_typed_card_list_honors_pagination_headers():
 def test_typed_card_list_accepts_a_name_filter():
     """Test a typed card list accepts its documented name contains filter."""
     response = requests.get(
-        f"{BASE_URL}/api/cards/settings?name=zzz-no-such-setting",
+        f"{BASE_URL}/api/cards/resources?name=zzz-no-such-resource",
         headers=_auth_headers(),
     )
     assert response.status_code == 200, _err(response, 200)
@@ -266,6 +236,6 @@ def test_typed_card_list_accepts_a_name_filter():
 def test_typed_card_list_rejects_an_unsupported_sort_field():
     """Test a typed card list rejects a sort_by outside its allowed order spec."""
     response = requests.get(
-        f"{BASE_URL}/api/cards/settings?sort_by=not_a_field", headers=_auth_headers()
+        f"{BASE_URL}/api/cards/resources?sort_by=not_a_field", headers=_auth_headers()
     )
     assert response.status_code == 400, _err(response, 400)

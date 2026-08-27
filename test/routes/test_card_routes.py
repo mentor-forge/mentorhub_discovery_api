@@ -5,11 +5,11 @@ The route layer is HTTP only: read the token, build the breadcrumb, parse the
 list request, call the service, and return the array unchanged. Services and
 the token/breadcrumb helpers are mocked, so no database or JWT is required.
 
-Typed lists come from two places — the local Customer / Product / Setting
-blueprints in `card_routes`, and the shared `create_*_get_routes` factories
-bound to the Card-projecting service subclasses — so both are mounted here.
-Several shared factories also mount a GET by-id rule the Card contract does not
-include, so `register_list_only_blueprint` is covered here too.
+`GET /api/cards` is the composite home list.
+Every typed list is a shared `create_*_get_routes` factory bound to a
+Card-projecting service subclass. Several shared factories also mount a GET by-id
+rule the Card contract does not include, so `register_list_only_blueprint` is
+covered here too.
 """
 
 import unittest
@@ -20,24 +20,21 @@ from flask import Flask
 from api_utils.flask_utils.exceptions import HTTPUnauthorized
 from api_utils.mongo_utils.list_query import DEFAULT_OFFSET, DEFAULT_SIZE, MAX_SIZE
 from api_utils.routes.shared_get_routes import (
+    create_event_get_routes,
     create_notification_get_routes,
     create_path_get_routes,
     create_plan_get_routes,
-    create_profile_get_routes,
     create_resource_get_routes,
 )
 
 from src.routes.card_routes import (
     create_cards_get_routes,
-    create_customer_cards_get_routes,
-    create_product_cards_get_routes,
-    create_settings_cards_get_routes,
     register_list_only_blueprint,
 )
+from src.services.event_service import EventCardService
 from src.services.notification_service import NotificationCardService
 from src.services.path_service import PathCardService
 from src.services.plan_service import PlanCardService
-from src.services.profile_service import MemberCardService, MenteeCardService
 from src.services.resource_service import ResourceCardService
 
 TOKEN = {
@@ -173,26 +170,18 @@ TYPED_CARDS = [
     {"_id": "665f1c2a9b1e4c0a1b2c3d20", "name": "One", "description": "First"}
 ]
 
-# Local typed lists: (path segment, blueprint factory, CardService getter).
-LOCAL_TYPED_LISTS = [
-    ("customer", create_customer_cards_get_routes, "get_customer_cards"),
-    ("products", create_product_cards_get_routes, "get_product_cards"),
-    ("settings", create_settings_cards_get_routes, "get_settings_cards"),
-]
-
 # Shared-factory typed lists: (path segment, factory, service class, list method).
 SHARED_TYPED_LISTS = [
     ("resources", create_resource_get_routes, ResourceCardService, "get_resources"),
     ("paths", create_path_get_routes, PathCardService, "get_paths"),
     ("plans", create_plan_get_routes, PlanCardService, "get_plans"),
-    ("members", create_profile_get_routes, MemberCardService, "get_profiles"),
-    ("mentees", create_profile_get_routes, MenteeCardService, "get_profiles"),
     (
         "notifications",
         create_notification_get_routes,
         NotificationCardService,
         "get_notifications",
     ),
+    ("events", create_event_get_routes, EventCardService, "get_events"),
 ]
 
 # The shared factories above that also mount a GET by-id rule, which Discovery
@@ -200,123 +189,10 @@ SHARED_TYPED_LISTS = [
 BY_ID_SHARED_TYPED_LISTS = [
     (segment, factory, service_cls)
     for segment, factory, service_cls, _ in SHARED_TYPED_LISTS
-    if segment != "notifications"
+    if segment not in ("notifications", "events")
 ]
 
 CARD_ID = "665f1c2a9b1e4c0a1b2c3d21"
-
-
-class TestLocalTypedCardLists(unittest.TestCase):
-    """Customer / Product / Setting have no shared factory behind them."""
-
-    def setUp(self):
-        token_patcher = patch(
-            "src.routes.card_routes.create_flask_token", return_value=TOKEN
-        )
-        breadcrumb_patcher = patch(
-            "src.routes.card_routes.create_flask_breadcrumb", return_value=BREADCRUMB
-        )
-
-        self.addCleanup(token_patcher.stop)
-        self.addCleanup(breadcrumb_patcher.stop)
-
-        self.mock_token = token_patcher.start()
-        breadcrumb_patcher.start()
-
-    def _client(self, factory, segment):
-        app = Flask(__name__)
-        app.register_blueprint(factory(), url_prefix=f"/api/cards/{segment}")
-        return app.test_client()
-
-    def _patch_getter(self, getter_name):
-        patcher = patch(f"src.routes.card_routes.CardService.{getter_name}")
-        self.addCleanup(patcher.stop)
-        return patcher.start()
-
-    def test_returns_200_with_an_array_body(self):
-        for segment, factory, getter_name in LOCAL_TYPED_LISTS:
-            with self.subTest(segment=segment):
-                self._patch_getter(getter_name).return_value = TYPED_CARDS
-
-                response = self._client(factory, segment).get(f"/api/cards/{segment}")
-
-                self.assertEqual(response.status_code, 200)
-                body = response.get_json()
-                self.assertIsInstance(body, list)
-                self.assertEqual(body, TYPED_CARDS)
-
-    def test_returns_an_empty_array_when_the_service_has_nothing(self):
-        for segment, factory, getter_name in LOCAL_TYPED_LISTS:
-            with self.subTest(segment=segment):
-                self._patch_getter(getter_name).return_value = []
-
-                response = self._client(factory, segment).get(f"/api/cards/{segment}")
-
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.get_json(), [])
-
-    def test_returns_401_without_a_token(self):
-        self.mock_token.side_effect = HTTPUnauthorized("Missing Authorization header")
-
-        for segment, factory, getter_name in LOCAL_TYPED_LISTS:
-            with self.subTest(segment=segment):
-                mock_getter = self._patch_getter(getter_name)
-
-                response = self._client(factory, segment).get(f"/api/cards/{segment}")
-
-                self.assertEqual(response.status_code, 401)
-                self.assertIn("error", response.get_json())
-                mock_getter.assert_not_called()
-
-    def test_passes_the_parsed_list_request_to_the_service(self):
-        for segment, factory, getter_name in LOCAL_TYPED_LISTS:
-            with self.subTest(segment=segment):
-                mock_getter = self._patch_getter(getter_name)
-                mock_getter.return_value = TYPED_CARDS
-
-                self._client(factory, segment).get(
-                    f"/api/cards/{segment}?name=widget&sort_by=name&order=desc",
-                    headers={"offset": "5", "size": "10"},
-                )
-
-                args, kwargs = mock_getter.call_args
-                self.assertEqual(args[:4], (TOKEN, BREADCRUMB, 5, 10))
-                self.assertEqual(args[4], {"name": "widget"})
-                self.assertEqual(args[5], [("name", -1), ("_id", -1)])
-                self.assertEqual(kwargs, {})
-
-    def test_defaults_pagination_when_the_headers_are_absent(self):
-        for segment, factory, getter_name in LOCAL_TYPED_LISTS:
-            with self.subTest(segment=segment):
-                mock_getter = self._patch_getter(getter_name)
-                mock_getter.return_value = TYPED_CARDS
-
-                self._client(factory, segment).get(f"/api/cards/{segment}")
-
-                args, _ = mock_getter.call_args
-                self.assertEqual(args[2:4], (DEFAULT_OFFSET, DEFAULT_SIZE))
-
-    def test_returns_400_for_pagination_outside_the_allowed_range(self):
-        for segment, factory, getter_name in LOCAL_TYPED_LISTS:
-            with self.subTest(segment=segment):
-                mock_getter = self._patch_getter(getter_name)
-
-                response = self._client(factory, segment).get(
-                    f"/api/cards/{segment}", headers={"size": str(MAX_SIZE + 1)}
-                )
-
-                self.assertEqual(response.status_code, 400)
-                mock_getter.assert_not_called()
-
-    def test_returns_500_when_the_service_fails(self):
-        for segment, factory, getter_name in LOCAL_TYPED_LISTS:
-            with self.subTest(segment=segment):
-                self._patch_getter(getter_name).side_effect = Exception("boom")
-
-                response = self._client(factory, segment).get(f"/api/cards/{segment}")
-
-                self.assertEqual(response.status_code, 500)
-                self.assertIn("error", response.get_json())
 
 
 class TestSharedFactoryTypedCardLists(unittest.TestCase):

@@ -12,26 +12,29 @@ import sys
 _FORBIDDEN_CREDENTIAL_ISSUER_PATH = "/%s-%s" % ("dev", "login")
 
 # Retired list/get prefixes, assembled like the credential path above so the
+# Retired list/get prefixes, assembled like the credential path above so the
 # confirmation grep for retired routes stays clean.
 RETIRED_ROUTE_PREFIXES = ["/api/%s" % name for name in ("profile", "customer")]
 
 TYPED_CARD_PATHS = [
-    "/api/cards/customer",
-    "/api/cards/members",
-    "/api/cards/mentees",
+    "/api/cards/events",
     "/api/cards/notifications",
     "/api/cards/paths",
     "/api/cards/plans",
-    "/api/cards/products",
     "/api/cards/resources",
+]
+
+DOOMED_CARD_PATHS = [
+    "/api/cards/customer",
+    "/api/cards/members",
+    "/api/cards/mentees",
+    "/api/cards/products",
     "/api/cards/settings",
 ]
 
 # Typed lists whose shared api-utils GET factory also mounts a GET by-id rule.
 # Discovery's Card contract is list-only, so those rules must be suppressed.
 LIST_ONLY_SHARED_CARD_PATHS = [
-    "/api/cards/members",
-    "/api/cards/mentees",
     "/api/cards/paths",
     "/api/cards/plans",
     "/api/cards/resources",
@@ -177,6 +180,16 @@ class TestAppConfiguration(unittest.TestCase):
         for prefix in RETIRED_ROUTE_PREFIXES:
             with self.subTest(prefix=prefix):
                 self.assertFalse(any(prefix in rule for rule in rules))
+
+    def test_doomed_typed_card_routes_not_registered(self):
+        """Doomed typed card routes were retired in F093."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        for path in DOOMED_CARD_PATHS:
+            with self.subTest(path=path):
+                self.assertNotIn(path, rules)
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 404)
 
     def test_typed_card_routes_registered(self):
         """Every typed card list is registered alongside the composite home list."""

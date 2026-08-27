@@ -38,25 +38,22 @@ app.json = MongoJSONEncoder(app)
 # Route registration (all grouped together)
 from api_utils import create_metric_routes, create_config_routes, create_explorer_routes
 from api_utils import (
+    create_event_get_routes,
     create_notification_get_routes,
     create_path_get_routes,
     create_plan_get_routes,
-    create_profile_get_routes,
     create_resource_get_routes,
 )
 
 from src.routes.card_routes import (
     create_cards_get_routes,
-    create_customer_cards_get_routes,
-    create_product_cards_get_routes,
-    create_settings_cards_get_routes,
     register_list_only_blueprint,
 )
 from src.routes.notification_routes import create_notification_routes
+from src.services.event_service import EventCardService
 from src.services.notification_service import NotificationCardService
 from src.services.path_service import PathCardService
 from src.services.plan_service import PlanCardService
-from src.services.profile_service import MemberCardService, MenteeCardService
 from src.services.resource_service import ResourceCardService
 
 # Register route blueprints
@@ -65,20 +62,9 @@ app.register_blueprint(create_explorer_routes(docs_dir), url_prefix="/docs")
 app.register_blueprint(create_config_routes(), url_prefix="/api/config")
 app.register_blueprint(create_cards_get_routes(), url_prefix="/api/cards")
 
-# Typed card lists: shared GET factories bound to Card-projecting subclasses,
-# plus local blueprints for the sources with no shared service class.
-app.register_blueprint(
-    create_customer_cards_get_routes(), url_prefix="/api/cards/customer"
-)
-app.register_blueprint(
-    create_product_cards_get_routes(), url_prefix="/api/cards/products"
-)
-app.register_blueprint(
-    create_settings_cards_get_routes(), url_prefix="/api/cards/settings"
-)
-
-# The shared factories below also mount a GET by-id rule. The Card contract is
-# list-only, so they register through the helper that keeps just the list rule.
+# Typed card lists: shared GET factories bound to Card-projecting subclasses.
+# Resource, Path, and Plan factories also mount a GET by-id rule, so they
+# register through register_list_only_blueprint to keep just the list rule.
 register_list_only_blueprint(
     app,
     create_resource_get_routes(ResourceCardService, name="resource_card_routes"),
@@ -94,21 +80,15 @@ register_list_only_blueprint(
     create_plan_get_routes(PlanCardService, name="plan_card_routes"),
     "/api/cards/plans",
 )
-register_list_only_blueprint(
-    app,
-    create_profile_get_routes(MemberCardService, name="member_card_routes"),
-    "/api/cards/members",
-)
-register_list_only_blueprint(
-    app,
-    create_profile_get_routes(MenteeCardService, name="mentee_card_routes"),
-    "/api/cards/mentees",
-)
 app.register_blueprint(
     create_notification_get_routes(
         NotificationCardService, name="notification_card_routes"
     ),
     url_prefix="/api/cards/notifications",
+)
+app.register_blueprint(
+    create_event_get_routes(EventCardService, name="event_card_routes"),
+    url_prefix="/api/cards/events",
 )
 
 # Notification control: Discovery owns create, dismiss, and cancel. Bound to

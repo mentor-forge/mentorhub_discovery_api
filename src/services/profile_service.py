@@ -3,8 +3,8 @@ Discovery Profile service.
 
 Discovery **consumes** Profile: the shared consume surface (get-by-token,
 get-by-id, paginated list) is inherited unchanged. The Discovery-only additions
-are the identity-scoped Member and Mentee lists that back the Card endpoints,
-plus the two Card-projecting subclasses the typed Card routes bind to.
+are the identity-scoped Member and Mentee lists that back the composite home
+Card endpoints.
 """
 
 import logging
@@ -180,54 +180,3 @@ class ProfileService(SharedProfileService):
             filters,
             sort_by,
         )
-
-
-class MemberCardService(ProfileService):
-    """
-    Member view of Profile projected onto the Card schema.
-
-    Bound to `create_profile_get_routes` for `/api/cards/members`. The list is
-    the token `customer_id` scope, which is narrower than the shared Profile
-    list, so it delegates to `get_member_profiles` rather than to `super()`.
-    """
-
-    @classmethod
-    def get_profiles(
-        cls,
-        token,
-        breadcrumb,
-        offset=DEFAULT_OFFSET,
-        size=DEFAULT_SIZE,
-        filters=None,
-        sort_by=None,
-    ):
-        """Get the caller's org members as Cards."""
-        profiles = cls.get_member_profiles(
-            token, breadcrumb, offset, size, filters, sort_by
-        )
-        return _member_cards(profiles, token=token)
-
-
-class MenteeCardService(ProfileService):
-    """
-    Mentee view of Profile projected onto the Card schema.
-
-    Bound to `create_profile_get_routes` for `/api/cards/mentees`. The list is
-    the token `mentor_id` scope, so it delegates to `get_mentee_profiles`.
-    """
-
-    @classmethod
-    def get_profiles(
-        cls,
-        token,
-        breadcrumb,
-        offset=DEFAULT_OFFSET,
-        size=DEFAULT_SIZE,
-        filters=None,
-        sort_by=None,
-    ):
-        """Get the caller's mentees as Cards."""
-        profiles = cls.get_mentee_profiles(
-            token, breadcrumb, offset, size, filters, sort_by
-        )
-        return _mentee_cards(profiles, token=token)
