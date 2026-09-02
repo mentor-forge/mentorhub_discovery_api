@@ -459,8 +459,32 @@ class TestHomeCardMentees(HomeCardsTestCase):
         )
 
         self.assertEqual([card["type"] for card in cards], ["Mentee", "Mentee"])
+        self.mock_mentees.assert_called_once()
         _, kwargs = self.mock_mentees.call_args
         self.assertEqual(kwargs["sort_by"], [("saved.at_time", -1), ("_id", -1)])
+
+    def test_mentees_included_with_profile_id_only(self):
+        self.mock_mentees.return_value = documents("mentee", 2)
+
+        cards = CardService.get_home_cards(
+            token(roles=["mentor"], profile_id=PROFILE_ID), BREADCRUMB
+        )
+
+        self.assertEqual([card["type"] for card in cards], ["Mentee", "Mentee"])
+        self.mock_mentees.assert_called_once()
+        _, kwargs = self.mock_mentees.call_args
+        self.assertEqual(kwargs["sort_by"], [("saved.at_time", -1), ("_id", -1)])
+
+    def test_mentees_included_when_mentor_id_wins_over_profile_id(self):
+        self.mock_mentees.return_value = documents("mentee", 1)
+
+        cards = CardService.get_home_cards(
+            token(roles=["mentor"], mentor_id=MENTOR_ID, profile_id=PROFILE_ID),
+            BREADCRUMB,
+        )
+
+        self.assertEqual([card["type"] for card in cards], ["Mentee"])
+        self.mock_mentees.assert_called_once()
 
     def test_mentees_omitted_without_mentor_role(self):
         self.mock_mentees.return_value = documents("mentee", 3)
@@ -472,7 +496,7 @@ class TestHomeCardMentees(HomeCardsTestCase):
         self.mock_mentees.assert_not_called()
         self.assertEqual([c for c in cards if c.get("type") == "Mentee"], [])
 
-    def test_mentees_omitted_without_mentor_id(self):
+    def test_mentees_omitted_without_scope_id(self):
         cards = CardService.get_home_cards(token(roles=["mentor"]), BREADCRUMB)
 
         self.mock_mentees.assert_not_called()

@@ -30,6 +30,12 @@ from api_utils.services.profile_service import (
 logger = logging.getLogger(__name__)
 
 
+def mentor_scope_id(token):
+    """Mentor identity: token ``mentor_id``, else ``profile_id`` (first present wins)."""
+    token = token or {}
+    return token.get("mentor_id") or token.get("profile_id")
+
+
 # `card_service` imports this module to assemble the composite home list, so the
 # two helpers below import CardService at call time rather than at module scope.
 
@@ -154,10 +160,12 @@ class ProfileService(SharedProfileService):
         sort_by=None,
     ):
         """
-        Get the Profiles mentored by the token `mentor_id`.
+        Get the Profiles mentored by the token mentor identity.
 
-        Returns an empty list when the token carries no `mentor_id`. Role
-        gating for the composite home list lives on CardService.
+        Scopes with ``mentor_id`` when present, otherwise ``profile_id``
+        (same fallback as shared Profile outbound). Returns an empty list
+        when neither claim is set. Role gating for the composite home list
+        lives on CardService.
 
         Args:
             token: Authentication token
@@ -174,7 +182,7 @@ class ProfileService(SharedProfileService):
             token,
             breadcrumb,
             "mentor_id",
-            token.get("mentor_id"),
+            mentor_scope_id(token),
             offset,
             size,
             filters,

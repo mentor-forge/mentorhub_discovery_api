@@ -28,7 +28,7 @@ from api_utils.services.profile_service import PROFILE_LIST_ORDER
 from api_utils.services.rbac import EMPTY_SCOPE_MATCH, build_outbound_match
 
 from src.services.notification_service import NotificationService
-from src.services.profile_service import ProfileService
+from src.services.profile_service import ProfileService, mentor_scope_id
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +209,7 @@ class CardService:
         4. Admin synthetic: Logs
         5. Customer singleton for token `customer_id` (Customer role only)
         6. Members for token `customer_id` (Customer or Coordinator roles only, newest saved first)
-        7. Mentees for token `mentor_id` (Mentor role only, newest saved first)
+        7. Mentees for token `mentor_id` or `profile_id` (Mentor role only, newest saved first)
         8. Mentee synthetic: Learning Journey
 
         `offset`/`size` apply to the combined list.
@@ -295,8 +295,8 @@ class CardService:
             )
             cards.extend(cls.project_all(CARD_TYPE_MEMBERS, members, token=token))
 
-        # 7. Mentee cards for Profiles with token mentor_id, saved.at_time desc
-        if token.get("mentor_id") and config.ROLE_MENTOR in roles:
+        # 7. Mentee cards for Profiles with token mentor_id or profile_id, saved.at_time desc
+        if config.ROLE_MENTOR in roles and mentor_scope_id(token):
             saved_desc = build_sort_by("saved.at_time", "desc", PROFILE_LIST_ORDER)
             mentees = ProfileService.get_mentee_profiles(
                 token,

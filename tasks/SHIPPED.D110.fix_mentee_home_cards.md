@@ -1,6 +1,6 @@
 # D110 – Default search must return Mentee cards
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Defect  
 **Depends On**: `F100_openapi_card_updates`  
 **Description**: `GET /api/cards` (the default search / home composite) does not return Mentee cards for Mentor callers whose token has `profile_id` but no `mentor_id` claim. Align mentee scope with shared Profile outbound (fall back to `profile_id`) so Mentor home lists include Mentee cards. Do not change Card `type`, `link`, or markdown content in this task.
@@ -75,3 +75,28 @@ Run all commands from this API repository root.
 The agent must not update files outside this list. Do not edit OpenAPI. Do not add or remove HTTP routes.
 
 ## Execution Notes
+
+**Plan** (written before implementation):
+
+1. Add module-level `mentor_scope_id(token)` in `src/services/profile_service.py` as `token.get("mentor_id") or token.get("profile_id")`. Identity ownership lives on Profile; `card_service` already imports this module, so a reverse import would cycle.
+2. `ProfileService.get_mentee_profiles` passes `mentor_scope_id(token)` as the `mentor_id` scope value into `_scoped_profiles` (still encodes via `encode_document` immediately before MongoIO / `execute_list_query`). Empty list when the resolved id is missing. No Mentor-role check here. `get_member_profiles` unchanged.
+3. `CardService.get_home_cards` section 7: include Mentee cards when `Config.ROLE_MENTOR` is in roles **and** `mentor_scope_id(token)` is present. Import the helper; do not query Profile except through `get_mentee_profiles`. Role gate stays on CardService.
+4. Tests: replace `test_mentees_omitted_without_mentor_id` with Mentor + `profile_id` only calling `get_mentee_profiles` and projecting Mentee cards. Keep Mentor + explicit `mentor_id` (claim wins). Keep Non-Mentor + `mentor_id` omitting the section. Create `test/services/test_profile_service.py` covering fallback encode of `profile_id` into the `mentor_id` match, `mentor_id` when present, and empty list when both are missing.
+5. Do not edit OpenAPI, routes, Notification links, synthetic cards, Member/Mentee markdown, or Products/Discounts links.
+6. Run `pipenv run test`, `lint`, `build`, `container`, `api`, `e2e`. Do not require Paula to return a non-empty Mentee list.
+
+**Summary**
+
+- Added `mentor_scope_id(token)` in `profile_service.py` (`mentor_id` or `profile_id`). Used in both `get_mentee_profiles` (scope match, still `encode_document` before MongoIO) and `CardService.get_home_cards` section 7 (Mentor role + resolved scope id). Role gate stays on CardService. Non-Mentor still skips the section. Empty list when neither claim is present. `get_member_profiles` unchanged.
+- Replaced `test_mentees_omitted_without_mentor_id` with Mentor + `profile_id` only including Mentee cards. Added claim-wins and missing-scope home tests. Created `test/services/test_profile_service.py` for fallback encode, `mentor_id` precedence, empty list, and no role gate in `get_mentee_profiles`.
+
+**Test results** (all from `mentorhub_discovery_api` root)
+
+- `pipenv run test` — 149 passed, 56 deselected (e2e)
+- `pipenv run lint` — pass (black --check; formatted `test_profile_service.py`)
+- `pipenv run build` — pass
+- `pipenv run container` — pass (image `ghcr.io/mentor-forge/mentorhub_discovery_api:latest`)
+- `pipenv run api` — pass (`mh up discovery-api`)
+- `pipenv run e2e` — 56 passed (Paula mentor home still green; no non-empty Mentee list assertion)
+
+Orchestrator confirmed unit/lint/build. Task file not renamed until commit.
