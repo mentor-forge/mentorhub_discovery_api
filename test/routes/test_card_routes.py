@@ -6,10 +6,11 @@ list request, call the service, and return the array unchanged. Services and
 the token/breadcrumb helpers are mocked, so no database or JWT is required.
 
 `GET /api/cards` is the composite home list.
-Every typed list is a shared `create_*_get_routes` factory bound to a
-Card-projecting service subclass. Several shared factories also mount a GET by-id
-rule the Card contract does not include, so `register_list_only_blueprint` is
-covered here too.
+Typed lists other than notifications are shared `create_*_get_routes` factories
+bound to Card-projecting service subclasses. Notification cards have a local
+list-only factory (see `test_notification_card_routes.py`). Several shared
+factories also mount a GET by-id rule the Card contract does not include, so
+`register_list_only_blueprint` is covered here too.
 """
 
 import unittest
@@ -21,7 +22,6 @@ from api_utils.flask_utils.exceptions import HTTPUnauthorized
 from api_utils.mongo_utils.list_query import DEFAULT_OFFSET, DEFAULT_SIZE, MAX_SIZE
 from api_utils.routes.shared_get_routes import (
     create_event_get_routes,
-    create_notification_get_routes,
     create_path_get_routes,
     create_plan_get_routes,
     create_resource_get_routes,
@@ -32,7 +32,6 @@ from src.routes.card_routes import (
     register_list_only_blueprint,
 )
 from src.services.event_service import EventCardService
-from src.services.notification_service import NotificationCardService
 from src.services.path_service import PathCardService
 from src.services.plan_service import PlanCardService
 from src.services.resource_service import ResourceCardService
@@ -175,12 +174,6 @@ SHARED_TYPED_LISTS = [
     ("resources", create_resource_get_routes, ResourceCardService, "get_resources"),
     ("paths", create_path_get_routes, PathCardService, "get_paths"),
     ("plans", create_plan_get_routes, PlanCardService, "get_plans"),
-    (
-        "notifications",
-        create_notification_get_routes,
-        NotificationCardService,
-        "get_notifications",
-    ),
     ("events", create_event_get_routes, EventCardService, "get_events"),
 ]
 
@@ -350,14 +343,12 @@ class TestListOnlyBlueprintRegistration(unittest.TestCase):
         app = Flask(__name__)
         register_list_only_blueprint(
             app,
-            create_notification_get_routes(
-                NotificationCardService, name="notification_card_routes"
-            ),
-            "/api/cards/notifications",
+            create_event_get_routes(EventCardService, name="event_card_routes"),
+            "/api/cards/events",
         )
 
         rules = [rule.rule for rule in app.url_map.iter_rules()]
-        self.assertIn("/api/cards/notifications", rules)
+        self.assertIn("/api/cards/events", rules)
 
     def test_restores_add_url_rule_for_later_registrations(self):
         app = self._register(

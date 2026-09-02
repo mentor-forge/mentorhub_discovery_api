@@ -255,6 +255,17 @@ class TestAppConfiguration(unittest.TestCase):
         response = self.client.get("/api/cards/notifications")
         self.assertIn(response.status_code, [200, 401, 500])
 
+    def test_notification_card_list_has_no_by_id_rule(self):
+        """GET /api/cards/notifications is list-only; a by-id URL is unrouted."""
+        rules = [rule.rule for rule in self.app.url_map.iter_rules()]
+
+        self.assertFalse(
+            any(rule.startswith("/api/cards/notifications/") for rule in rules),
+            f"by-id rule registered: {rules}",
+        )
+        response = self.client.get(f"/api/cards/notifications/{CARD_ID}")
+        self.assertEqual(response.status_code, 404)
+
 
 class TestSignalHandlers(unittest.TestCase):
     """Test cases for signal handler registration and behavior."""

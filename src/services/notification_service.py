@@ -11,9 +11,21 @@ import logging
 
 from api_utils import Config, MongoIO
 from api_utils.flask_utils.exceptions import HTTPForbidden
-from api_utils.mongo_utils.list_query import DEFAULT_OFFSET, DEFAULT_SIZE, and_match
+from api_utils.mongo_utils.list_query import (
+    DEFAULT_OFFSET,
+    DEFAULT_SIZE,
+    and_match,
+    build_match_filter,
+)
 from api_utils.services import NotificationService as SharedNotificationService
 from api_utils.services.rbac import is_admin, require_outbound
+
+# Admin-only filters for GET /api/cards/notifications. Home composite reads
+# do not use this spec.
+NOTIFICATION_CARD_LIST_FILTERS = {
+    "name": {"type": "contains", "field": "name"},
+    "status": {"type": "in_list", "field": "status"},
+}
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +44,26 @@ def active_match():
     }
 
 
-def _notification_cards(notifications, token=None, *, notification_link=False):
+def _admin_filter_requested(filters):
+    """True when the caller sent a name or status filter key (even empty)."""
+    if not filters:
+        return False
+    return any(key in filters for key in NOTIFICATION_CARD_LIST_FILTERS)
+
+
+def _applicable_card_filters(filters):
+    """Drop blank values so presence-only keys do not become Mongo clauses."""
+    applicable = {}
+    for key, value in (filters or {}).items():
+        if key not in NOTIFICATION_CARD_LIST_FILTERS:
+            continue
+        if value in (None, "", []):
+            continue
+        applicable[key] = value
+    return applicable
+
+
+def _notification_cards(notifications, token=None):
     """
     Project Notification documents onto Notification Cards.
 
@@ -45,7 +76,6 @@ def _notification_cards(notifications, token=None, *, notification_link=False):
         CARD_TYPE_NOTIFICATIONS,
         notifications,
         token=token,
-        notification_link=notification_link,
     )
 
 
@@ -191,9 +221,10 @@ class NotificationCardService(NotificationService):
     """
     Notification read surface projected onto the Card schema.
 
-    Bound to `create_notification_get_routes` for `/api/cards/notifications`.
+    Bound to `create_notification_card_get_routes` for `/api/cards/notifications`.
     Projection lives here and not on `NotificationService` so create, dismiss,
-    and cancel keep returning the Notification document.
+    and cancel keep returning the Notification document. Admin-only `name` /
+    `status` filters are enforced here so they cannot leak through outbound.
     """
 
     @classmethod
@@ -205,9 +236,29 @@ class NotificationCardService(NotificationService):
         offset=DEFAULT_OFFSET,
         size=DEFAULT_SIZE,
         match=None,
+        filters=None,
     ):
-        """Get the visible Notifications as Cards."""
+        """Get the visible Notifications as Cards.
+
+        `name` and `status` filters are admin-only. Non-admin callers that
+        send those params receive 403 before any list query runs.
+        """
+        if _admin_filter_requested(filters) and not is_admin(token):
+            raise HTTPForbidden("Not permitted to filter notifications")
+
+        extra = dict(match) if match else {}
+        applicable = _applicable_card_filters(filters) if is_admin(token) else {}
+        if applicable:
+            extra = and_match(
+                extra,
+                build_match_filter({}, applicable, NOTIFICATION_CARD_LIST_FILTERS),
+            )
+
         notifications = super().get_notifications(
-            token, breadcrumb, offset=offset, size=size, match=match
+            token,
+            breadcrumb,
+            offset=offset,
+            size=size,
+            match=extra or None,
         )
-        return _notification_cards(notifications, token=token, notification_link=True)
+        return _notification_cards(notifications, token=token)

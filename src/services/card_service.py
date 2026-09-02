@@ -28,11 +28,13 @@ from api_utils.services.profile_service import PROFILE_LIST_ORDER
 from api_utils.services.rbac import EMPTY_SCOPE_MATCH, build_outbound_match
 
 from src.services.notification_service import NotificationService
-from src.services.profile_service import ProfileService
+from src.services.profile_service import ProfileService, mentor_scope_id
 
 logger = logging.getLogger(__name__)
 
 ARCHIVED_STATUS = "archived"
+CARD_DESCRIPTION_MAX_LENGTH = 4096
+CARD_NOTES_EMPTY = "*No notes*"
 
 CARD_TYPE_CUSTOMER = "customer"
 CARD_TYPE_EVENT = "event"
@@ -53,12 +55,11 @@ _PROFILE_FIELDS = {"name": ("full_name", "name"), "description": ("description",
 _NOTIFICATION_FIELDS = {"name": ("name",), "description": ("message",)}
 _EVENT_FIELDS = {"name": ("type",), "description": ("description",)}
 
-# `type` is optional in the Card schema and its enum is
-# Event | Member | Mentee | Notification | Path | Plan | Resource. Customer
-# source has no enum value, so its card omits `type` rather than emit a value
-# the schema rejects.
+# `type` is optional in the Card schema. Mongo-backed projections stamp the
+# enum value from this table; home synthetics (Products, Discounts, Logs,
+# Journey) are built by `_synthetic_card` instead.
 CARD_TYPE_SPECS = {
-    CARD_TYPE_CUSTOMER: {"type": None, "fields": _NAMED_FIELDS},
+    CARD_TYPE_CUSTOMER: {"type": "Customer", "fields": _NAMED_FIELDS},
     CARD_TYPE_EVENT: {"type": "Event", "fields": _EVENT_FIELDS},
     CARD_TYPE_EVENTS: {"type": "Event", "fields": _EVENT_FIELDS},
     CARD_TYPE_MEMBER: {"type": "Member", "fields": _PROFILE_FIELDS},
@@ -83,7 +84,17 @@ class CardService:
     """
 
     @classmethod
-    def project(cls, card_type, document, token=None, *, notification_link=False):
+    def _synthetic_card(cls, name, description, card_type, link):
+        """Build a non-persisted home Card (no `_id`)."""
+        return {
+            "name": name,
+            "description": description,
+            "type": card_type,
+            "link": link,
+        }
+
+    @classmethod
+    def project(cls, card_type, document, token=None):
         """
         Project a source document onto the Card schema.
 
@@ -95,7 +106,6 @@ class CardService:
             card_type: One of the keys in CARD_TYPE_SPECS
             document: The source document to project
             token: Authentication token dictionary (optional)
-            notification_link: Whether to emit link for Notification cards
 
         Returns:
             dict: The Card projection
@@ -131,14 +141,11 @@ class CardService:
 
         if id_str is not None:
             if card_type in (CARD_TYPE_NOTIFICATION, CARD_TYPE_NOTIFICATIONS):
-                if notification_link:
-                    card["link"] = f"discovery/notification/{id_str}"
+                card["link"] = f"discovery/notification/{id_str}"
             elif card_type in (CARD_TYPE_MEMBER, CARD_TYPE_MEMBERS):
                 card["link"] = f"customer/profile/{id_str}"
             elif card_type in (CARD_TYPE_MENTEE, CARD_TYPE_MENTEES):
-                card["link"] = f"mentee/mentee/{id_str}"
-            elif card_type in (CARD_TYPE_EVENT, CARD_TYPE_EVENTS):
-                card["link"] = f"mentee/event/{id_str}"
+                card["link"] = f"mentor/mentee/{id_str}"
             elif card_type == CARD_TYPE_CUSTOMER:
                 card["link"] = f"customer/customer/{id_str}"
             elif card_type == CARD_TYPE_RESOURCES:
@@ -153,7 +160,7 @@ class CardService:
         return card
 
     @classmethod
-    def project_all(cls, card_type, documents, token=None, *, notification_link=False):
+    def project_all(cls, card_type, documents, token=None):
         """
         Project a list of source documents onto the Card schema.
 
@@ -161,20 +168,110 @@ class CardService:
             card_type: One of the keys in CARD_TYPE_SPECS
             documents: The source documents to project
             token: Authentication token dictionary (optional)
-            notification_link: Whether to emit link for Notification cards
 
         Returns:
             list: The Card projections
         """
         return [
-            cls.project(
-                card_type,
-                document,
-                token=token,
-                notification_link=notification_link,
-            )
+            cls.project(card_type, document, token=token)
             for document in documents or []
         ]
+
+    @classmethod
+    def _member_description(cls, counts, event_count):
+        """Markdown for a Member card: Journey progress plus 30-day activity."""
+        from src.services.event_service import CARD_ACTIVITY_WINDOW_DAYS
+
+        counts = counts or {}
+        return (
+            "**Progress**\n"
+            f"- Library: {counts.get('library', 0)}\n"
+            f"- Now: {counts.get('now', 0)}\n"
+            f"- Next: {counts.get('next', 0)}\n"
+            "\n"
+            "**Activity**\n"
+            f"- {event_count} events in the last {CARD_ACTIVITY_WINDOW_DAYS} days"
+        )
+
+    @classmethod
+    def _mentee_description(cls, event_count, notes):
+        """Markdown for a Mentee card: 30-day activity plus the caller's notes."""
+        from src.services.event_service import CARD_ACTIVITY_WINDOW_DAYS
+
+        header = (
+            "**Activity**\n"
+            f"- {event_count} events in the last {CARD_ACTIVITY_WINDOW_DAYS} days\n"
+            "\n"
+            "**Notes**\n"
+        )
+        bodies = []
+        for note in notes or []:
+            text = note.get("note")
+            if not text:
+                continue
+            bodies.append(" ".join(str(text).split()))
+        if not bodies:
+            return header + f"- {CARD_NOTES_EMPTY}"
+
+        lines = []
+        for body in bodies:
+            prefix = "- "
+            joiner = "\n" if lines else ""
+            available = (
+                CARD_DESCRIPTION_MAX_LENGTH
+                - len(header)
+                - len("\n".join(lines))
+                - len(joiner)
+                - len(prefix)
+            )
+            if available <= 0:
+                break
+            if len(body) > available:
+                body = body[:available]
+            if not body:
+                break
+            lines.append(prefix + body)
+        if not lines:
+            return header + f"- {CARD_NOTES_EMPTY}"
+        return (header + "\n".join(lines))[:CARD_DESCRIPTION_MAX_LENGTH]
+
+    @classmethod
+    def _project_member_cards(cls, members, token, breadcrumb):
+        """Copy each Member Profile, set Markdown description, then project."""
+        from src.services.event_service import EventService
+        from src.services.journey_service import JourneyService
+
+        cards = []
+        for member in members or []:
+            source = dict(member)
+            profile_id = source.get("_id")
+            counts = JourneyService.resource_counts_for_profile(
+                profile_id, token, breadcrumb
+            )
+            event_count = EventService.recent_event_count_for_profile(
+                profile_id, token, breadcrumb
+            )
+            source["description"] = cls._member_description(counts, event_count)
+            cards.append(cls.project(CARD_TYPE_MEMBERS, source, token=token))
+        return cards
+
+    @classmethod
+    def _project_mentee_cards(cls, mentees, token, breadcrumb):
+        """Copy each Mentee Profile, set Markdown description, then project."""
+        from src.services.event_service import EventService
+        from src.services.note_service import NoteService
+
+        cards = []
+        for mentee in mentees or []:
+            source = dict(mentee)
+            profile_id = source.get("_id")
+            event_count = EventService.recent_event_count_for_profile(
+                profile_id, token, breadcrumb
+            )
+            notes = NoteService.notes_for_profile(profile_id, token, breadcrumb)
+            source["description"] = cls._mentee_description(event_count, notes)
+            cards.append(cls.project(CARD_TYPE_MENTEES, source, token=token))
+        return cards
 
     @classmethod
     def _customer_home_card(cls, token, breadcrumb):
@@ -209,7 +306,7 @@ class CardService:
         4. Admin synthetic: Logs
         5. Customer singleton for token `customer_id` (Customer role only)
         6. Members for token `customer_id` (Customer or Coordinator roles only, newest saved first)
-        7. Mentees for token `mentor_id` (Mentor role only, newest saved first)
+        7. Mentees whose Profile.mentor_id equals token profile_id (Mentor role only, newest saved first)
         8. Mentee synthetic: Learning Journey
 
         `offset`/`size` apply to the combined list.
@@ -246,32 +343,34 @@ class CardService:
                     CARD_TYPE_NOTIFICATIONS,
                     notifications,
                     token=token,
-                    notification_link=False,
                 )
             )
 
         # 2-4. Admin synthetic cards
         if config.ROLE_ADMIN in roles:
             cards.append(
-                {
-                    "name": "Products",
-                    "description": "Manage subscription products",
-                    "link": "admin/products",
-                }
+                cls._synthetic_card(
+                    "Products",
+                    "Manage subscription products",
+                    "Products",
+                    "admin/settings",
+                )
             )
             cards.append(
-                {
-                    "name": "Discounts",
-                    "description": "Manage discount codes",
-                    "link": "admin/discounts",
-                }
+                cls._synthetic_card(
+                    "Discounts",
+                    "Manage discount codes",
+                    "Discounts",
+                    "admin/settings?tab=discounts",
+                )
             )
             cards.append(
-                {
-                    "name": "Logs",
-                    "description": "View system logs",
-                    "link": "admin/logs",
-                }
+                cls._synthetic_card(
+                    "Logs",
+                    "View system logs",
+                    "Logs",
+                    "admin/logs",
+                )
             )
 
         # 5. Customer card for token customer_id
@@ -293,10 +392,10 @@ class CardService:
                 size=section_size,
                 sort_by=saved_desc,
             )
-            cards.extend(cls.project_all(CARD_TYPE_MEMBERS, members, token=token))
+            cards.extend(cls._project_member_cards(members, token, breadcrumb))
 
-        # 7. Mentee cards for Profiles with token mentor_id, saved.at_time desc
-        if token.get("mentor_id") and config.ROLE_MENTOR in roles:
+        # 7. Mentee cards for Profiles with mentor_id = token.profile_id (login.html mentors)
+        if config.ROLE_MENTOR in roles and mentor_scope_id(token):
             saved_desc = build_sort_by("saved.at_time", "desc", PROFILE_LIST_ORDER)
             mentees = ProfileService.get_mentee_profiles(
                 token,
@@ -305,16 +404,17 @@ class CardService:
                 size=section_size,
                 sort_by=saved_desc,
             )
-            cards.extend(cls.project_all(CARD_TYPE_MENTEES, mentees, token=token))
+            cards.extend(cls._project_mentee_cards(mentees, token, breadcrumb))
 
         # 8. Mentee synthetic card (Learning Journey)
         if config.ROLE_MENTEE in roles:
             cards.append(
-                {
-                    "name": "Learning Journey",
-                    "description": "Continue your learning journey",
-                    "link": "mentee/journey",
-                }
+                cls._synthetic_card(
+                    "Learning Journey",
+                    "Continue your learning journey",
+                    "Journey",
+                    "mentee/journey",
+                )
             )
 
         page = cards[offset : offset + size]

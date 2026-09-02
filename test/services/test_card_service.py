@@ -39,14 +39,19 @@ from src.services.card_service import (
 # Card.yaml 0.0.0.0 properties (additionalProperties: false, nothing required).
 CARD_PROPERTIES = {"_id", "name", "description", "link", "type"}
 
-# The Card `type` enum has no Customer, Product, or Setting value.
+# F100 Card.type enum: collection-aligned values plus Discovery synthetics.
 CARD_TYPE_ENUM = {
+    "Customer",
+    "Discounts",
     "Event",
+    "Journey",
+    "Logs",
     "Member",
     "Mentee",
     "Notification",
     "Path",
     "Plan",
+    "Products",
     "Resource",
 }
 
@@ -145,6 +150,15 @@ class TestProject(unittest.TestCase):
 
         self.assertEqual(card["name"], "j")
 
+    def test_project_member_keeps_source_description(self):
+        """project is a pure field map; enrichment happens before it is called."""
+        card = CardService.project(
+            CARD_TYPE_MEMBERS,
+            {"_id": ObjectId(), "name": "j", "description": "original prose"},
+        )
+
+        self.assertEqual(card["description"], "original prose")
+
     def test_project_resource_links_mentor_vs_non_mentor(self):
         source_id = ObjectId()
         source = {"_id": source_id, "name": "Docs", "url": "https://example.com"}
@@ -198,21 +212,14 @@ class TestProject(unittest.TestCase):
         mentee_card = CardService.project(
             CARD_TYPE_MENTEES, {"_id": source_id, "name": "Mentee"}
         )
-        self.assertEqual(mentee_card["link"], f"mentee/mentee/{source_id}")
+        self.assertEqual(mentee_card["link"], f"mentor/mentee/{source_id}")
 
-    def test_project_notification_link_flag(self):
+    def test_project_notification_always_sets_link(self):
         source_id = ObjectId()
         source = {"_id": source_id, "name": "N", "message": "msg"}
 
-        card_home = CardService.project(
-            CARD_TYPE_NOTIFICATIONS, source, notification_link=False
-        )
-        self.assertNotIn("link", card_home)
-
-        card_typed = CardService.project(
-            CARD_TYPE_NOTIFICATIONS, source, notification_link=True
-        )
-        self.assertEqual(card_typed["link"], f"discovery/notification/{source_id}")
+        card = CardService.project(CARD_TYPE_NOTIFICATIONS, source)
+        self.assertEqual(card["link"], f"discovery/notification/{source_id}")
 
     def test_project_event(self):
         source_id = ObjectId()
@@ -228,12 +235,13 @@ class TestProject(unittest.TestCase):
         self.assertEqual(card["_id"], source_id)
         self.assertEqual(card["name"], "login")
         self.assertEqual(card["type"], "Event")
-        self.assertEqual(card["link"], f"mentee/event/{source_id}")
+        self.assertNotIn("link", card)
         self.assertNotIn("context", card)
         self.assertNotIn("created", card)
 
     def test_project_typed_sources_use_enum_values(self):
         expected = {
+            CARD_TYPE_CUSTOMER: "Customer",
             CARD_TYPE_EVENTS: "Event",
             CARD_TYPE_MEMBERS: "Member",
             CARD_TYPE_MENTEES: "Mentee",
@@ -251,10 +259,24 @@ class TestProject(unittest.TestCase):
                 self.assertEqual(card["type"], enum_value)
                 self.assertIn(card["type"], CARD_TYPE_ENUM)
 
-    def test_project_omits_type_for_sources_without_enum_value(self):
+    def test_project_customer_emits_type(self):
         card = CardService.project(CARD_TYPE_CUSTOMER, {"_id": ObjectId(), "name": "n"})
-        self.assertNotIn("type", card)
+        self.assertEqual(card["type"], "Customer")
+        self.assertIn(card["type"], CARD_TYPE_ENUM)
         self.assertTrue(set(card).issubset(CARD_PROPERTIES))
+
+    def test_synthetic_card_emits_type_and_link_without_id(self):
+        card = CardService._synthetic_card(
+            "Products",
+            "Manage subscription products",
+            "Products",
+            "admin/settings",
+        )
+        self.assertEqual(card["type"], "Products")
+        self.assertEqual(card["link"], "admin/settings")
+        self.assertNotIn("_id", card)
+        self.assertTrue(set(card).issubset(CARD_PROPERTIES))
+        self.assertIn(card["type"], CARD_TYPE_ENUM)
 
     def test_project_unknown_type_raises_bad_request(self):
         with self.assertRaises(HTTPBadRequest):
@@ -280,18 +302,36 @@ class HomeCardsTestCase(unittest.TestCase):
             "src.services.card_service.ProfileService.get_mentee_profiles"
         )
         query_patcher = patch("src.services.card_service.execute_list_query")
+        journey_patcher = patch(
+            "src.services.journey_service.JourneyService.resource_counts_for_profile",
+            return_value={"library": 0, "now": 0, "next": 0},
+        )
+        event_count_patcher = patch(
+            "src.services.event_service.EventService.recent_event_count_for_profile",
+            return_value=0,
+        )
+        notes_patcher = patch(
+            "src.services.note_service.NoteService.notes_for_profile",
+            return_value=[],
+        )
 
         self.addCleanup(config_patcher.stop)
         self.addCleanup(notifications_patcher.stop)
         self.addCleanup(members_patcher.stop)
         self.addCleanup(mentees_patcher.stop)
         self.addCleanup(query_patcher.stop)
+        self.addCleanup(journey_patcher.stop)
+        self.addCleanup(event_count_patcher.stop)
+        self.addCleanup(notes_patcher.stop)
 
         config_patcher.start()
         self.mock_notifications = notifications_patcher.start()
         self.mock_members = members_patcher.start()
         self.mock_mentees = mentees_patcher.start()
         self.mock_query = query_patcher.start()
+        self.mock_journey_counts = journey_patcher.start()
+        self.mock_event_count = event_count_patcher.start()
+        self.mock_notes = notes_patcher.start()
 
         self.mock_notifications.return_value = []
         self.mock_members.return_value = []
@@ -312,7 +352,7 @@ class TestHomeCardNotifications(HomeCardsTestCase):
         self.assertEqual(len(cards), 1)
         self.assertEqual(cards[0]["type"], "Notification")
         self.assertEqual(cards[0]["description"], "Hi")
-        self.assertNotIn("link", cards[0])
+        self.assertEqual(cards[0]["link"], f"discovery/notification/{cards[0]['_id']}")
 
     def test_notifications_scoped_to_token_profile_id(self):
         CardService.get_home_cards(token(profile_id=PROFILE_ID), BREADCRUMB)
@@ -340,7 +380,8 @@ class TestHomeCardAdmin(HomeCardsTestCase):
             {
                 "name": "Products",
                 "description": "Manage subscription products",
-                "link": "admin/products",
+                "type": "Products",
+                "link": "admin/settings",
             },
         )
         self.assertEqual(
@@ -348,7 +389,8 @@ class TestHomeCardAdmin(HomeCardsTestCase):
             {
                 "name": "Discounts",
                 "description": "Manage discount codes",
-                "link": "admin/discounts",
+                "type": "Discounts",
+                "link": "admin/settings?tab=discounts",
             },
         )
         self.assertEqual(
@@ -356,11 +398,12 @@ class TestHomeCardAdmin(HomeCardsTestCase):
             {
                 "name": "Logs",
                 "description": "View system logs",
+                "type": "Logs",
                 "link": "admin/logs",
             },
         )
         for card in cards:
-            self.assertNotIn("type", card)
+            self.assertIn(card["type"], CARD_TYPE_ENUM)
             self.assertNotIn("_id", card)
 
     def test_admin_omitted_without_admin_role(self):
@@ -385,7 +428,7 @@ class TestHomeCardCustomer(HomeCardsTestCase):
         self.assertEqual(cards[0]["name"], "Acme Corp")
         self.assertEqual(cards[0]["description"], "Acme customer")
         self.assertEqual(cards[0]["link"], f"customer/customer/{CUSTOMER_ID}")
-        self.assertNotIn("type", cards[0])
+        self.assertEqual(cards[0]["type"], "Customer")
 
     def test_customer_card_omitted_for_coordinator_only(self):
         self.mock_query.return_value = [
@@ -455,25 +498,53 @@ class TestHomeCardMentees(HomeCardsTestCase):
         self.mock_mentees.return_value = documents("mentee", 2)
 
         cards = CardService.get_home_cards(
-            token(roles=["mentor"], mentor_id=MENTOR_ID), BREADCRUMB
+            token(roles=["mentor"], profile_id=PROFILE_ID), BREADCRUMB
         )
 
         self.assertEqual([card["type"] for card in cards], ["Mentee", "Mentee"])
+        self.assertTrue(cards[0]["link"].startswith("mentor/mentee/"))
+        self.mock_mentees.assert_called_once()
         _, kwargs = self.mock_mentees.call_args
         self.assertEqual(kwargs["sort_by"], [("saved.at_time", -1), ("_id", -1)])
+
+    def test_mentees_included_with_profile_id_only(self):
+        self.mock_mentees.return_value = documents("mentee", 2)
+
+        cards = CardService.get_home_cards(
+            token(roles=["mentor"], profile_id=PROFILE_ID, mentor_id=""), BREADCRUMB
+        )
+
+        self.assertEqual([card["type"] for card in cards], ["Mentee", "Mentee"])
+        self.mock_mentees.assert_called_once()
+        _, kwargs = self.mock_mentees.call_args
+        self.assertEqual(kwargs["sort_by"], [("saved.at_time", -1), ("_id", -1)])
+
+    def test_mentees_included_when_profile_id_wins_over_mentor_id_claim(self):
+        self.mock_mentees.return_value = documents("mentee", 1)
+
+        cards = CardService.get_home_cards(
+            token(roles=["mentor"], mentor_id=MENTOR_ID, profile_id=PROFILE_ID),
+            BREADCRUMB,
+        )
+
+        self.assertEqual([card["type"] for card in cards], ["Mentee"])
+        self.mock_mentees.assert_called_once()
 
     def test_mentees_omitted_without_mentor_role(self):
         self.mock_mentees.return_value = documents("mentee", 3)
 
         cards = CardService.get_home_cards(
-            token(roles=["customer"], mentor_id=MENTOR_ID), BREADCRUMB
+            token(roles=["customer"], mentor_id=MENTOR_ID, profile_id=PROFILE_ID),
+            BREADCRUMB,
         )
 
         self.mock_mentees.assert_not_called()
         self.assertEqual([c for c in cards if c.get("type") == "Mentee"], [])
 
-    def test_mentees_omitted_without_mentor_id(self):
-        cards = CardService.get_home_cards(token(roles=["mentor"]), BREADCRUMB)
+    def test_mentees_omitted_without_profile_id(self):
+        cards = CardService.get_home_cards(
+            token(roles=["mentor"], mentor_id=MENTOR_ID), BREADCRUMB
+        )
 
         self.mock_mentees.assert_not_called()
         self.assertEqual(cards, [])
@@ -491,10 +562,10 @@ class TestHomeCardMenteeJourney(HomeCardsTestCase):
             {
                 "name": "Learning Journey",
                 "description": "Continue your learning journey",
+                "type": "Journey",
                 "link": "mentee/journey",
             },
         )
-        self.assertNotIn("type", cards[0])
         self.assertNotIn("_id", cards[0])
 
     def test_learning_journey_omitted_without_mentee_role(self):
@@ -539,21 +610,27 @@ class TestHomeCardComposition(HomeCardsTestCase):
         # 8. Learning Journey
         self.assertEqual(len(cards), 11)
         self.assertEqual(cards[0]["type"], "Notification")
-        self.assertNotIn("link", cards[0])
+        self.assertEqual(cards[0]["link"], f"discovery/notification/{cards[0]['_id']}")
         self.assertEqual(cards[1]["type"], "Notification")
         self.assertEqual(cards[2]["name"], "Products")
-        self.assertEqual(cards[2]["link"], "admin/products")
+        self.assertEqual(cards[2]["type"], "Products")
+        self.assertEqual(cards[2]["link"], "admin/settings")
         self.assertEqual(cards[3]["name"], "Discounts")
-        self.assertEqual(cards[3]["link"], "admin/discounts")
+        self.assertEqual(cards[3]["type"], "Discounts")
+        self.assertEqual(cards[3]["link"], "admin/settings?tab=discounts")
         self.assertEqual(cards[4]["name"], "Logs")
+        self.assertEqual(cards[4]["type"], "Logs")
         self.assertEqual(cards[4]["link"], "admin/logs")
         self.assertEqual(cards[5]["name"], "Acme Corp")
+        self.assertEqual(cards[5]["type"], "Customer")
         self.assertEqual(cards[5]["link"], f"customer/customer/{CUSTOMER_ID}")
         self.assertEqual(cards[6]["type"], "Member")
         self.assertEqual(cards[7]["type"], "Member")
         self.assertEqual(cards[8]["type"], "Mentee")
+        self.assertTrue(cards[8]["link"].startswith("mentor/mentee/"))
         self.assertEqual(cards[9]["type"], "Mentee")
         self.assertEqual(cards[10]["name"], "Learning Journey")
+        self.assertEqual(cards[10]["type"], "Journey")
         self.assertEqual(cards[10]["link"], "mentee/journey")
 
     def test_offset_and_size_slice_the_combined_list(self):
@@ -707,6 +784,158 @@ class TestNotificationCardIsolation(unittest.TestCase):
         )
 
         self.assertEqual(notifications, self.notifications)
+
+
+class TestHomeCardMemberMarkdown(HomeCardsTestCase):
+    """Member cards replace Profile description with progress + activity Markdown."""
+
+    def test_member_description_contains_progress_and_activity(self):
+        self.mock_members.return_value = [
+            {
+                "_id": ObjectId(),
+                "full_name": "Jane Doe",
+                "description": "original prose",
+            }
+        ]
+        self.mock_journey_counts.return_value = {"library": 4, "now": 2, "next": 7}
+        self.mock_event_count.return_value = 5
+
+        cards = CardService.get_home_cards(
+            token(roles=["customer"], customer_id=CUSTOMER_ID), BREADCRUMB
+        )
+
+        self.assertEqual(len(cards), 1)
+        description = cards[0]["description"]
+        self.assertIn("Library", description)
+        self.assertIn("Now", description)
+        self.assertIn("Next", description)
+        self.assertIn("30 days", description)
+        self.assertIn("- Library: 4", description)
+        self.assertIn("- Now: 2", description)
+        self.assertIn("- Next: 7", description)
+        self.assertIn("5 events in the last 30 days", description)
+        self.assertNotIn("original prose", description)
+        self.assertEqual(cards[0]["type"], "Member")
+        self.assertTrue(cards[0]["link"].startswith("customer/profile/"))
+
+    def test_member_description_zeros_when_helpers_return_empty(self):
+        self.mock_members.return_value = documents("member", 1)
+
+        cards = CardService.get_home_cards(
+            token(roles=["customer"], customer_id=CUSTOMER_ID), BREADCRUMB
+        )
+
+        description = cards[0]["description"]
+        self.assertIn("- Library: 0", description)
+        self.assertIn("- Now: 0", description)
+        self.assertIn("- Next: 0", description)
+        self.assertIn("0 events in the last 30 days", description)
+        self.assertIsNotNone(description)
+
+    def test_customer_member_enrichment_does_not_require_mentor_role(self):
+        self.mock_members.return_value = documents("member", 1)
+
+        CardService.get_home_cards(
+            token(roles=["customer"], customer_id=CUSTOMER_ID), BREADCRUMB
+        )
+
+        self.mock_journey_counts.assert_called_once()
+        self.mock_event_count.assert_called_once()
+        self.mock_notes.assert_not_called()
+
+    def test_coordinator_member_enrichment_does_not_require_mentor_role(self):
+        self.mock_members.return_value = documents("member", 1)
+
+        CardService.get_home_cards(
+            token(roles=["coordinator"], customer_id=CUSTOMER_ID), BREADCRUMB
+        )
+
+        self.mock_journey_counts.assert_called_once()
+        self.mock_event_count.assert_called_once()
+        self.mock_notes.assert_not_called()
+
+
+class TestHomeCardMenteeMarkdown(HomeCardsTestCase):
+    """Mentee cards replace Profile description with activity + notes Markdown."""
+
+    def test_mentee_description_contains_activity_and_notes(self):
+        self.mock_mentees.return_value = [
+            {
+                "_id": ObjectId(),
+                "full_name": "Daniel",
+                "description": "original prose",
+            }
+        ]
+        self.mock_event_count.return_value = 3
+        self.mock_notes.return_value = [{"note": "Ask about the path"}]
+
+        cards = CardService.get_home_cards(
+            token(roles=["mentor"], profile_id=PROFILE_ID, mentor_id=""), BREADCRUMB
+        )
+
+        self.assertEqual(len(cards), 1)
+        description = cards[0]["description"]
+        self.assertIn("30 days", description)
+        self.assertIn("**Notes**", description)
+        self.assertIn("3 events in the last 30 days", description)
+        self.assertIn("Ask about the path", description)
+        self.assertNotIn("original prose", description)
+        self.assertEqual(cards[0]["type"], "Mentee")
+        self.assertTrue(cards[0]["link"].startswith("mentor/mentee/"))
+
+    def test_mentee_description_empty_notes_line_when_helpers_return_empty(self):
+        self.mock_mentees.return_value = documents("mentee", 1)
+
+        cards = CardService.get_home_cards(
+            token(roles=["mentor"], profile_id=PROFILE_ID, mentor_id=""), BREADCRUMB
+        )
+
+        description = cards[0]["description"]
+        self.assertIn("0 events in the last 30 days", description)
+        self.assertIn("**Notes**", description)
+        self.assertIn("*No notes*", description)
+        self.assertIsNotNone(description)
+
+    def test_mentor_mentee_enrichment_does_not_require_customer_role(self):
+        self.mock_mentees.return_value = documents("mentee", 1)
+
+        CardService.get_home_cards(
+            token(roles=["mentor"], profile_id=PROFILE_ID, mentor_id=""), BREADCRUMB
+        )
+
+        self.mock_notes.assert_called_once()
+        self.mock_event_count.assert_called_once()
+        self.mock_journey_counts.assert_not_called()
+
+
+class TestHomeCardEnrichmentGates(HomeCardsTestCase):
+    """Non-member / non-mentee home paths must not call enrichment helpers."""
+
+    def test_mentee_only_path_does_not_call_enrichment_helpers(self):
+        cards = CardService.get_home_cards(token(roles=["mentee"]), BREADCRUMB)
+
+        self.mock_journey_counts.assert_not_called()
+        self.mock_event_count.assert_not_called()
+        self.mock_notes.assert_not_called()
+        self.assertEqual(cards[0]["type"], "Journey")
+
+    def test_admin_only_path_does_not_call_enrichment_helpers(self):
+        CardService.get_home_cards(token(roles=["admin"]), BREADCRUMB)
+
+        self.mock_journey_counts.assert_not_called()
+        self.mock_event_count.assert_not_called()
+        self.mock_notes.assert_not_called()
+
+    def test_typed_lists_do_not_call_enrichment_helpers(self):
+        with patch(
+            "api_utils.services.resource_service.ResourceService.get_resources",
+            return_value=documents("row", 1),
+        ):
+            ResourceCardService.get_resources(token(), BREADCRUMB)
+
+        self.mock_journey_counts.assert_not_called()
+        self.mock_event_count.assert_not_called()
+        self.mock_notes.assert_not_called()
 
 
 if __name__ == "__main__":

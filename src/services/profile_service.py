@@ -4,12 +4,14 @@ Discovery Profile service.
 Discovery **consumes** Profile: the shared consume surface (get-by-token,
 get-by-id, paginated list) is inherited unchanged. The Discovery-only additions
 are the identity-scoped Member and Mentee lists that back the composite home
-Card endpoints.
+Card endpoints, and a batched ``full_name`` lookup used by Event cards.
 """
 
 import logging
 
-from api_utils import Config
+from bson import ObjectId
+
+from api_utils import Config, MongoIO
 from api_utils.mongo_utils import encode_document
 from api_utils.mongo_utils.list_query import (
     DEFAULT_OFFSET,
@@ -21,6 +23,7 @@ from api_utils.mongo_utils.list_query import (
 )
 from api_utils.services import ProfileService as SharedProfileService
 from api_utils.services.profile_service import (
+    ARCHIVED_STATUS,
     DATE_PROPERTIES,
     ID_PROPERTIES,
     PROFILE_LIST_FILTERS,
@@ -28,6 +31,19 @@ from api_utils.services.profile_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def mentor_scope_id(token):
+    """The caller's Profile ``_id`` used to find Mentee Profiles.
+
+    Developer Edition ``login.html`` / ``welcome-auth.js`` mint mentor JWTs
+    with ``roles`` containing ``mentor``, ``profile_id`` set to the mentor's
+    Profile ``_id``, and ``mentor_id`` empty. Seed mentee Profiles store that
+    same id on ``mentor_id``. The ``mentor_id`` *claim* is the caller's mentor
+    (used on mentee tokens) and must not scope this list.
+    """
+    token = token or {}
+    return token.get("profile_id") or None
 
 
 # `card_service` imports this module to assemble the composite home list, so the
@@ -154,10 +170,14 @@ class ProfileService(SharedProfileService):
         sort_by=None,
     ):
         """
-        Get the Profiles mentored by the token `mentor_id`.
+        Get Profiles whose ``mentor_id`` equals the token ``profile_id``.
 
-        Returns an empty list when the token carries no `mentor_id`. Role
-        gating for the composite home list lives on CardService.
+        This is the Mentor home list: login.html mentor personas (Marti,
+        Paula, Elon, Danny, Melinda) carry ``profile_id`` and an empty
+        ``mentor_id`` claim. Do not AND shared Profile identity ``$or`` —
+        that clause uses the ``mentor_id`` *claim* and would miss mentees.
+
+        Archived Profiles stay hidden. Role gating lives on CardService.
 
         Args:
             token: Authentication token
@@ -170,13 +190,88 @@ class ProfileService(SharedProfileService):
         Returns:
             list: Profile documents for the caller's mentees
         """
-        return cls._scoped_profiles(
-            token,
-            breadcrumb,
-            "mentor_id",
-            token.get("mentor_id"),
-            offset,
-            size,
-            filters,
-            sort_by,
+        cls._check_permission(token, "read")
+
+        profile_id = mentor_scope_id(token)
+        if not profile_id:
+            return []
+
+        scope = {"mentor_id": profile_id}
+        encode_document(scope, ID_PROPERTIES, DATE_PROPERTIES)
+
+        match = and_match(
+            build_match_filter(
+                {"status": {"$ne": ARCHIVED_STATUS}},
+                filters or {},
+                PROFILE_LIST_FILTERS,
+            ),
+            scope,
         )
+        if sort_by is None:
+            default = PROFILE_LIST_ORDER["default"]
+            sort_by = build_sort_by(
+                default["field"], default["order"], PROFILE_LIST_ORDER
+            )
+
+        config = Config.get_instance()
+        profiles = execute_list_query(
+            config.PROFILE_COLLECTION_NAME,
+            match=match,
+            sort_by=sort_by,
+            offset=offset,
+            size=size,
+        )
+
+        logger.info(
+            f"Retrieved {len(profiles)} mentee profiles for mentor "
+            f"{profile_id} user {token.get('user_id')}"
+        )
+        return profiles
+
+    @classmethod
+    def full_names_for_ids(cls, profile_ids):
+        """
+        Map Profile ids to ``full_name`` (falling back to ``name``).
+
+        Used by Event cards after the Event list is already outbound-scoped.
+        Does not apply Profile outbound RBAC.
+
+        Args:
+            profile_ids: Iterable of Profile ``_id`` values (string or ObjectId)
+
+        Returns:
+            dict: ``str(profile_id)`` -> display name
+        """
+        unique_ids = []
+        seen = set()
+        for profile_id in profile_ids or []:
+            if not profile_id:
+                continue
+            key = str(profile_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                unique_ids.append(ObjectId(key))
+            except Exception:
+                continue
+
+        if not unique_ids:
+            return {}
+
+        mongo = MongoIO.get_instance()
+        config = Config.get_instance()
+        docs = mongo.get_documents(
+            config.PROFILE_COLLECTION_NAME,
+            match={"_id": {"$in": unique_ids}},
+            project={"full_name": 1, "name": 1},
+        )
+
+        names = {}
+        for doc in docs or []:
+            doc_id = doc.get("_id")
+            display = doc.get("full_name") or doc.get("name")
+            if doc_id is None or not display:
+                continue
+            names[str(doc_id)] = display
+        return names
