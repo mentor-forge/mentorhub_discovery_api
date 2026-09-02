@@ -33,6 +33,8 @@ from src.services.profile_service import ProfileService, mentor_scope_id
 logger = logging.getLogger(__name__)
 
 ARCHIVED_STATUS = "archived"
+CARD_DESCRIPTION_MAX_LENGTH = 4096
+CARD_NOTES_EMPTY = "*No notes*"
 
 CARD_TYPE_CUSTOMER = "customer"
 CARD_TYPE_EVENT = "event"
@@ -178,6 +180,102 @@ class CardService:
         ]
 
     @classmethod
+    def _member_description(cls, counts, event_count):
+        """Markdown for a Member card: Journey progress plus 30-day activity."""
+        from src.services.event_service import CARD_ACTIVITY_WINDOW_DAYS
+
+        counts = counts or {}
+        return (
+            "**Progress**\n"
+            f"- Library: {counts.get('library', 0)}\n"
+            f"- Now: {counts.get('now', 0)}\n"
+            f"- Next: {counts.get('next', 0)}\n"
+            "\n"
+            "**Activity**\n"
+            f"- {event_count} events in the last {CARD_ACTIVITY_WINDOW_DAYS} days"
+        )
+
+    @classmethod
+    def _mentee_description(cls, event_count, notes):
+        """Markdown for a Mentee card: 30-day activity plus the caller's notes."""
+        from src.services.event_service import CARD_ACTIVITY_WINDOW_DAYS
+
+        header = (
+            "**Activity**\n"
+            f"- {event_count} events in the last {CARD_ACTIVITY_WINDOW_DAYS} days\n"
+            "\n"
+            "**Notes**\n"
+        )
+        bodies = []
+        for note in notes or []:
+            text = note.get("note")
+            if not text:
+                continue
+            bodies.append(" ".join(str(text).split()))
+        if not bodies:
+            return header + f"- {CARD_NOTES_EMPTY}"
+
+        lines = []
+        for body in bodies:
+            prefix = "- "
+            joiner = "\n" if lines else ""
+            available = (
+                CARD_DESCRIPTION_MAX_LENGTH
+                - len(header)
+                - len("\n".join(lines))
+                - len(joiner)
+                - len(prefix)
+            )
+            if available <= 0:
+                break
+            if len(body) > available:
+                body = body[:available]
+            if not body:
+                break
+            lines.append(prefix + body)
+        if not lines:
+            return header + f"- {CARD_NOTES_EMPTY}"
+        return (header + "\n".join(lines))[:CARD_DESCRIPTION_MAX_LENGTH]
+
+    @classmethod
+    def _project_member_cards(cls, members, token, breadcrumb):
+        """Copy each Member Profile, set Markdown description, then project."""
+        from src.services.event_service import EventService
+        from src.services.journey_service import JourneyService
+
+        cards = []
+        for member in members or []:
+            source = dict(member)
+            profile_id = source.get("_id")
+            counts = JourneyService.resource_counts_for_profile(
+                profile_id, token, breadcrumb
+            )
+            event_count = EventService.recent_event_count_for_profile(
+                profile_id, token, breadcrumb
+            )
+            source["description"] = cls._member_description(counts, event_count)
+            cards.append(cls.project(CARD_TYPE_MEMBERS, source, token=token))
+        return cards
+
+    @classmethod
+    def _project_mentee_cards(cls, mentees, token, breadcrumb):
+        """Copy each Mentee Profile, set Markdown description, then project."""
+        from src.services.event_service import EventService
+        from src.services.note_service import NoteService
+
+        cards = []
+        for mentee in mentees or []:
+            source = dict(mentee)
+            profile_id = source.get("_id")
+            event_count = EventService.recent_event_count_for_profile(
+                profile_id, token, breadcrumb
+            )
+            notes = NoteService.notes_for_profile(profile_id, token, breadcrumb)
+            source["description"] = cls._mentee_description(event_count, notes)
+            cards.append(cls.project(CARD_TYPE_MENTEES, source, token=token))
+        return cards
+
+    @classmethod
     def _customer_home_card(cls, token, breadcrumb):
         """Fetch the caller's Customer document and project it as a Customer card."""
         config = Config.get_instance()
@@ -296,7 +394,7 @@ class CardService:
                 size=section_size,
                 sort_by=saved_desc,
             )
-            cards.extend(cls.project_all(CARD_TYPE_MEMBERS, members, token=token))
+            cards.extend(cls._project_member_cards(members, token, breadcrumb))
 
         # 7. Mentee cards for Profiles with token mentor_id or profile_id, saved.at_time desc
         if config.ROLE_MENTOR in roles and mentor_scope_id(token):
@@ -308,7 +406,7 @@ class CardService:
                 size=section_size,
                 sort_by=saved_desc,
             )
-            cards.extend(cls.project_all(CARD_TYPE_MENTEES, mentees, token=token))
+            cards.extend(cls._project_mentee_cards(mentees, token, breadcrumb))
 
         # 8. Mentee synthetic card (Learning Journey)
         if config.ROLE_MENTEE in roles:

@@ -1,6 +1,6 @@
 # F130 – Member and Mentee card Markdown content
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Feature  
 **Depends On**: `F120_card_type_and_link_projection`  
 **Description**: Replace Member and Mentee Card `description` with Markdown that a Customer (progress + activity) or Mentor (activity + notes) can scan. Keep F120 `type`/`link` behavior. Enrichment is consume-only via local Journey / Event / Note subclasses and MongoIO.
@@ -133,3 +133,53 @@ Run all commands from this API repository root.
 The agent must not update files outside this list. Do not change OpenAPI. Do not add HTTP routes. Do not change Notification filters.
 
 ## Execution Notes
+
+### Plan (before implementation)
+
+Configurator reachable. Live latest JSON schemas (versioned URLs HTTP 200):
+
+| Dictionary | Latest version | Notes for F130 |
+| --- | --- | --- |
+| Journey.yaml | `0.1.0.0` | `status` enum `active`/`archived`. Match `{profile_id, status: active}`. `library`/`now` are arrays; `next` is modules with nested `topics.resources` in the live schema, but counts must use the same arithmetic as shared `get_journey_progress` (sum `len(item.resources)` over `next`). |
+| Event.yaml | `0.1.0.0` | Identity is `context.profile_id` (no top-level `profile_id`). Time field is `created.at_time`. Also match legacy top-level `profile_id` like shared Event identity. Window: `created.at_time >= now - 30 days` UTC. |
+| Note.yaml | `0.1.0.0` | Body field is `note`. Subject/author identity field is `profile_id`. Author breadcrumb is `created.by_user`. `status` enum `active`/`archived`. Newest `created.at_time` first, cap 3. |
+| Card.yaml | `0.0.0.0` | `description` maxLength **4096**. |
+
+Approach:
+
+1. Add `JourneyService(SharedJourneyService)` with `resource_counts_for_profile` via MongoIO `get_documents` + `encode_document` on `profile_id`. Missing journey → zeros. Do **not** call shared `get_journey_progress`.
+2. Add `EventService.recent_event_count_for_profile` via MongoIO `get_documents` with `$or` of encoded `context.profile_id` / `profile_id` plus `created.at_time $gte` cutoff. Return `len(docs)`. Constant `CARD_ACTIVITY_WINDOW_DAYS = 30`.
+3. Add `NoteService(SharedNoteService)` with `notes_for_profile`: match encoded mentee `profile_id`, exclude archived, AND `created.by_user` with `token.user_id` when present, sort newest first, size 3. Empty list when none.
+4. `CardService.get_home_cards` copies each Member/Mentee Profile, sets Markdown `description` from those helpers, then `project`. `project` stays a pure field map. Typed Resource/Path/Plan/Event/Notification lists do not call helpers. F120 `type`/`link` unchanged.
+5. Export `JourneyService` and `NoteService` from `src/services/__init__.py`.
+6. Tests: unit coverage for markdown/zeros/least-privilege/encode; then lint/build/container/api/e2e; curl OpenAPI still F100.
+
+No OpenAPI, routes, Notification filters, Pipfile, or api_utils changes.
+
+### Implementation summary
+
+- `JourneyService.resource_counts_for_profile` — MongoIO `get_documents` on active Journey for encoded `profile_id`; Library/Now `len`; Next sums `resources` like shared `get_journey_progress` (no shared RBAC call). Missing → zeros.
+- `EventService.recent_event_count_for_profile` — MongoIO `get_documents` `$or` of encoded `context.profile_id` / `profile_id` plus `created.at_time $gte now-30d` UTC. Returns `len(docs)`.
+- `NoteService.notes_for_profile` — `execute_list_query` on encoded mentee `profile_id`, exclude archived, AND `created.by_user` = `token.user_id` when present, newest first, size 3. Body field `note`. Empty list when none.
+- `CardService` copies each Member/Mentee Profile, sets Markdown `description`, then `project`. F120 `type`/`link` unchanged. Typed lists do not call helpers.
+- Exported `JourneyService` and `NoteService` from `src/services/__init__.py`.
+
+Live `Note.yaml` `profile_id` is described as the note-taker; it is the only Profile identity field, so it is used as the mentee subject match per the task. Live `Journey.yaml` `next` is modules→topics→resources; counts still use shared `get_journey_progress` arithmetic (sum `next[].resources`).
+
+`rg 'get_collection' src` is zero. No Blocked condition.
+
+### Test results
+
+| Command | Result |
+| --- | --- |
+| Configurator schema curls (Journey, Event, Note, Card) | Pass (HTTP 200); versions `0.1.0.0` / `0.1.0.0` / `0.1.0.0` / `0.0.0.0` |
+| `pipenv run test` | Pass (177 passed, 56 deselected, 89 subtests) |
+| `pipenv run lint` | Pass (after `pipenv run format` on new tests) |
+| `pipenv run build` | Pass |
+| `pipenv run container` | Pass |
+| `pipenv run api` | Pass (`mh up discovery-api`) |
+| `pipenv run e2e` | Pass (56 passed, 177 deselected) |
+| `curl -s http://localhost:8397/docs/openapi.yaml` | Pass — F100 spec unchanged (`info.version: 0.4.0`, Member Library/Now/Next, Mentee `mentor/mentee/{id}`, 30-day window) |
+| `rg 'get_collection' src` | Zero matches |
+
+Orchestrator confirmed unit/lint/build and `rg get_collection src` is zero.
