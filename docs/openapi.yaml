@@ -33,7 +33,7 @@ info:
 
     For local development, obtain a JWT from the Developer Edition welcome / IdP flow, or use a
     test token from `test/e2e/e2e_auth.py` that matches your `JWT_SECRET` and expected claims.
-  version: 0.3.0
+  version: 0.4.0
   contact:
     name: Mentor Forge
     email: info@agile-learning-institute.com
@@ -64,28 +64,35 @@ paths:
         Returns the composite home Card list for the caller, assembled in this exact order:
 
         1. **Active Notifications** for the token `profile_id` (newest `created.at_time` first;
-           neither `dismissed` nor `cancelled`). Omitted if no `profile_id`. Home Notification
-           cards omit `link` (the SPA opens a Dismiss confirmation rather than a detail route).
+           neither `dismissed` nor `cancelled`). Omitted if no `profile_id`. Every Notification
+           card includes `type: Notification` and `link: "discovery/notification/{id}"`.
         2. If token roles contain Admin (`Config.ROLE_ADMIN`): one synthetic **Products** card
-           (`link: "admin/products"`, omits `type` and `_id`).
+           (`type: Products`, `link: "admin/settings"`).
         3. If token roles contain Admin: one synthetic **Discounts** card
-           (`link: "admin/discounts"`, omits `type` and `_id`).
+           (`type: Discounts`, `link: "admin/settings?tab=discounts"`).
         4. If token roles contain Admin: one synthetic **Logs** card
-           (`link: "admin/logs"`, omits `type` and `_id`).
+           (`type: Logs`, `link: "admin/logs"`).
         5. If token roles contain Customer (`Config.ROLE_CUSTOMER`) and `customer_id` is present:
-           one **Customer** card for token `customer_id` (`link: "customer/customer/{id}"`,
-           omits `type`).
+           one **Customer** card for token `customer_id` (`type: Customer`,
+           `link: "customer/customer/{id}"`).
         6. If token roles contain Customer or Coordinator (`Config.ROLE_CUSTOMER`,
            `Config.ROLE_COORDINATOR`) and `customer_id` is present: **Member** cards for Profiles
-           with token `customer_id`, ordered newest `saved.at_time` first (`link: "customer/profile/{id}"`).
+           with token `customer_id`, ordered newest `saved.at_time` first (`type: Member`,
+           `link: "customer/profile/{id}"`). `description` is Markdown summarizing Journey
+           progress (Library / Now / Next resource counts) and Activity (Event count in the last
+           30 days).
         7. If token roles contain Mentor (`Config.ROLE_MENTOR`) and `mentor_id` is present:
            **Mentee** cards for Profiles with token `mentor_id`, ordered newest `saved.at_time`
-           first (`link: "mentee/mentee/{id}"`).
+           first (`type: Mentee`, `link: "mentor/mentee/{id}"`). `description` is Markdown
+           summarizing Activity (Event count in the last 30 days) and the mentor's Notes on that
+           mentee.
         8. If token roles contain Mentee (`Config.ROLE_MENTEE`): one synthetic **Learning Journey**
-           card (`link: "mentee/journey"`, omits `type` and `_id`).
+           card (`type: Journey`, `link: "mentee/journey"`).
 
+        Event counts on Member and Mentee cards use a constant **30-day** activity window.
         `offset` and `size` apply to the combined composite list. This operation paginates only;
-        the typed lists carry per-type filter and order parameters.
+        the typed lists carry per-type filter and order parameters. Card `link` values are relative
+        SPA paths with no leading slash; the client prepends the SPA origin.
       operationId: getHomeCards
       security:
         - bearerAuth: []
@@ -248,13 +255,34 @@ paths:
         Returns Notification Cards visible to the caller. Outbound RBAC scopes the list to
         notifications targeting the token `profile_id`, `customer_id`, or `mentor_id`, plus
         globally scoped notifications, and excludes archived documents. Each card has `type: Notification`
-        and `link: "discovery/notification/{id}"`. Notifications are ordered newest first by `created.at_time`.
+        and `link: "discovery/notification/{id}"` (relative SPA path, no leading slash).
+        Notifications are ordered newest first by `created.at_time`.
+
+        Query filters `name` (`contains`) and `status` (`in_list`, `active` / `archived`) are
+        **admin-only** (`Config.ROLE_ADMIN`). Non-admin callers that send `name` or `status`
+        receive `403`. Non-admin lists remain outbound-scoped and unfiltered by those params.
       operationId: getNotificationCards
       security:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/OffsetHeader'
         - $ref: '#/components/parameters/SizeHeader'
+        - name: name
+          in: query
+          required: false
+          description: |
+            Admin-only case-insensitive `contains` filter on notification name
+            (`Config.ROLE_ADMIN`). Non-admin callers that send this parameter receive `403`.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: |
+            Admin-only comma-separated `in_list` filter on notification status
+            (`active` / `archived`). Non-admin callers that send this parameter receive `403`.
+          schema:
+            type: string
         - name: sort_by
           in: query
           required: false
@@ -281,6 +309,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -683,7 +713,10 @@ components:
         Discovery landing card. `Card` is a configurator-only projection schema (`Card.yaml`,
         version `0.0.0.0`) rather than a persisted MongoDB collection: Discovery projects source
         documents (Notification, Profile, Resource, Path, Plan, and so on) onto this shape. The
-        `type` discriminator names the source collection.
+        `type` discriminator names the source collection or the synthetic card kind this API emits.
+        Property set matches live `Card.yaml` (`_id`, `name`, `description`, `link`, `type`;
+        `additionalProperties: false`). `link` remains a relative SPA path on the wire even when
+        live `Card.yaml` marks `format: uri`.
       additionalProperties: false
       properties:
         _id:
@@ -698,21 +731,29 @@ components:
         description:
           type: string
           maxLength: 4096
-          description: The card contents
+          description: Markdown card contents (maxLength from live Card.yaml)
         link:
           type: string
           format: uri
-          description: The url the card links to
+          description: Relative SPA path the card links to (no leading slash)
         type:
           type: string
-          description: The Card Type (Collection Aligned)
+          description: |
+            Card type this API emits. Union of live `Card.yaml` collection-aligned values
+            (`Event`, `Member`, `Mentee`, `Notification`, `Path`, `Plan`, `Resource`) with
+            Discovery synthetic types (`Customer`, `Products`, `Discounts`, `Logs`, `Journey`).
           enum:
+            - Customer
+            - Discounts
             - Event
+            - Journey
+            - Logs
             - Member
             - Mentee
             - Notification
             - Path
             - Plan
+            - Products
             - Resource
 
     Notification:
