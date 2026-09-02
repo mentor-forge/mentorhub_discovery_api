@@ -53,12 +53,11 @@ _PROFILE_FIELDS = {"name": ("full_name", "name"), "description": ("description",
 _NOTIFICATION_FIELDS = {"name": ("name",), "description": ("message",)}
 _EVENT_FIELDS = {"name": ("type",), "description": ("description",)}
 
-# `type` is optional in the Card schema and its enum is
-# Event | Member | Mentee | Notification | Path | Plan | Resource. Customer
-# source has no enum value, so its card omits `type` rather than emit a value
-# the schema rejects.
+# `type` is optional in the Card schema. Mongo-backed projections stamp the
+# enum value from this table; home synthetics (Products, Discounts, Logs,
+# Journey) are built by `_synthetic_card` instead.
 CARD_TYPE_SPECS = {
-    CARD_TYPE_CUSTOMER: {"type": None, "fields": _NAMED_FIELDS},
+    CARD_TYPE_CUSTOMER: {"type": "Customer", "fields": _NAMED_FIELDS},
     CARD_TYPE_EVENT: {"type": "Event", "fields": _EVENT_FIELDS},
     CARD_TYPE_EVENTS: {"type": "Event", "fields": _EVENT_FIELDS},
     CARD_TYPE_MEMBER: {"type": "Member", "fields": _PROFILE_FIELDS},
@@ -83,7 +82,17 @@ class CardService:
     """
 
     @classmethod
-    def project(cls, card_type, document, token=None, *, notification_link=False):
+    def _synthetic_card(cls, name, description, card_type, link):
+        """Build a non-persisted home Card (no `_id`)."""
+        return {
+            "name": name,
+            "description": description,
+            "type": card_type,
+            "link": link,
+        }
+
+    @classmethod
+    def project(cls, card_type, document, token=None):
         """
         Project a source document onto the Card schema.
 
@@ -95,7 +104,6 @@ class CardService:
             card_type: One of the keys in CARD_TYPE_SPECS
             document: The source document to project
             token: Authentication token dictionary (optional)
-            notification_link: Whether to emit link for Notification cards
 
         Returns:
             dict: The Card projection
@@ -131,12 +139,11 @@ class CardService:
 
         if id_str is not None:
             if card_type in (CARD_TYPE_NOTIFICATION, CARD_TYPE_NOTIFICATIONS):
-                if notification_link:
-                    card["link"] = f"discovery/notification/{id_str}"
+                card["link"] = f"discovery/notification/{id_str}"
             elif card_type in (CARD_TYPE_MEMBER, CARD_TYPE_MEMBERS):
                 card["link"] = f"customer/profile/{id_str}"
             elif card_type in (CARD_TYPE_MENTEE, CARD_TYPE_MENTEES):
-                card["link"] = f"mentee/mentee/{id_str}"
+                card["link"] = f"mentor/mentee/{id_str}"
             elif card_type in (CARD_TYPE_EVENT, CARD_TYPE_EVENTS):
                 card["link"] = f"mentee/event/{id_str}"
             elif card_type == CARD_TYPE_CUSTOMER:
@@ -153,7 +160,7 @@ class CardService:
         return card
 
     @classmethod
-    def project_all(cls, card_type, documents, token=None, *, notification_link=False):
+    def project_all(cls, card_type, documents, token=None):
         """
         Project a list of source documents onto the Card schema.
 
@@ -161,18 +168,12 @@ class CardService:
             card_type: One of the keys in CARD_TYPE_SPECS
             documents: The source documents to project
             token: Authentication token dictionary (optional)
-            notification_link: Whether to emit link for Notification cards
 
         Returns:
             list: The Card projections
         """
         return [
-            cls.project(
-                card_type,
-                document,
-                token=token,
-                notification_link=notification_link,
-            )
+            cls.project(card_type, document, token=token)
             for document in documents or []
         ]
 
@@ -246,32 +247,34 @@ class CardService:
                     CARD_TYPE_NOTIFICATIONS,
                     notifications,
                     token=token,
-                    notification_link=False,
                 )
             )
 
         # 2-4. Admin synthetic cards
         if config.ROLE_ADMIN in roles:
             cards.append(
-                {
-                    "name": "Products",
-                    "description": "Manage subscription products",
-                    "link": "admin/products",
-                }
+                cls._synthetic_card(
+                    "Products",
+                    "Manage subscription products",
+                    "Products",
+                    "admin/settings",
+                )
             )
             cards.append(
-                {
-                    "name": "Discounts",
-                    "description": "Manage discount codes",
-                    "link": "admin/discounts",
-                }
+                cls._synthetic_card(
+                    "Discounts",
+                    "Manage discount codes",
+                    "Discounts",
+                    "admin/settings?tab=discounts",
+                )
             )
             cards.append(
-                {
-                    "name": "Logs",
-                    "description": "View system logs",
-                    "link": "admin/logs",
-                }
+                cls._synthetic_card(
+                    "Logs",
+                    "View system logs",
+                    "Logs",
+                    "admin/logs",
+                )
             )
 
         # 5. Customer card for token customer_id
@@ -310,11 +313,12 @@ class CardService:
         # 8. Mentee synthetic card (Learning Journey)
         if config.ROLE_MENTEE in roles:
             cards.append(
-                {
-                    "name": "Learning Journey",
-                    "description": "Continue your learning journey",
-                    "link": "mentee/journey",
-                }
+                cls._synthetic_card(
+                    "Learning Journey",
+                    "Continue your learning journey",
+                    "Journey",
+                    "mentee/journey",
+                )
             )
 
         page = cards[offset : offset + size]

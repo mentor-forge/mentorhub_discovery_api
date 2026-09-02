@@ -1,6 +1,6 @@
 # F120 – Card `type` catalog and `link` projection
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Feature  
 **Depends On**: `D110_fix_mentee_home_cards`  
 **Description**: Emit F100 Card `type` values on every home card (including synthetics and Customer), always set Notification `link`, point Mentee cards at `mentor/mentee/{id}`, and retarget Products/Discounts links to Admin settings. Do not enrich Member/Mentee markdown yet (F130) and do not add Notification filters (F140).
@@ -93,3 +93,31 @@ Run all commands from this API repository root.
 The agent must not update files outside this list. Do not change OpenAPI. Do not add or remove HTTP routes. Do not change Member/Mentee `description` content.
 
 ## Execution Notes
+
+### Planned approach (before implementation)
+
+- **`CardService.project` / `project_all`**: delete `notification_link`. Always emit `link` `discovery/notification/{id}` when `_id` is present. Change Mentee link to `mentor/mentee/{id}`. Set `CARD_TYPE_SPECS` Customer `type` to `"Customer"`. Do not add Coordinator or synthetic type specs (synthetics are not Mongo projections).
+- **Synthetics**: add a private `_synthetic_card(name, description, card_type, link)` helper that returns a Card dict (no `_id`). Use it for Products (`admin/settings`), Discounts (`admin/settings?tab=discounts`), Logs (`admin/logs`), and Learning Journey (`mentee/journey`). Keep descriptions unchanged.
+- **`get_home_cards`**: drop `notification_link=False` on notification `project_all`. Leave D110 `mentor_scope_id` gating as-is.
+- **`notification_service.py`**: drop `notification_link` from `_notification_cards` and `NotificationCardService.get_notifications`.
+- **Unit tests**: expand `CARD_TYPE_ENUM`; always-on Notification link; Customer emits `type`; admin/Journey synthetics include `type` and new links; drop omit-link / `notification_link=False` cases. `test_notification_service.py` does not assert the flag — leave it.
+- **E2E**: update only assertions that would fail (Mike links, Daniel Notification `link` / Journey `type`, Paula `mentor/mentee/`, Stacey Customer `type`, `CARD_TYPE_ENUM` for `_assert_card_shape`).
+- Do not touch OpenAPI, routes, or Member/Mentee description content.
+
+### Implementation
+
+Implemented as planned. Deleted `notification_link` entirely (no remaining two-behavior callers). D110 `mentor_scope_id` home gating unchanged. `test_notification_service.py` untouched.
+
+### Tests
+
+- `pipenv run test` — 150 passed, 56 deselected (e2e), 89 subtests
+- `pipenv run format` then `pipenv run lint` — black clean
+- `pipenv run build` — compileall ok
+- `pipenv run container` — image `ghcr.io/mentor-forge/mentorhub_discovery_api:latest`
+- `pipenv run api` — `mh down && mh up discovery-api` (side effect: stopped other running mentorhub containers)
+- `pipenv run e2e` — 56 passed, 150 deselected
+- `curl http://localhost:8397/docs/openapi.yaml` — still F100 spec, `info.version: 0.4.0`, Products/Discounts/Logs/Journey/Customer type+link table unchanged
+
+### Follow-ups
+
+None for this task. Orchestrator confirmed unit/lint/build.

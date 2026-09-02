@@ -39,14 +39,19 @@ from src.services.card_service import (
 # Card.yaml 0.0.0.0 properties (additionalProperties: false, nothing required).
 CARD_PROPERTIES = {"_id", "name", "description", "link", "type"}
 
-# The Card `type` enum has no Customer, Product, or Setting value.
+# F100 Card.type enum: collection-aligned values plus Discovery synthetics.
 CARD_TYPE_ENUM = {
+    "Customer",
+    "Discounts",
     "Event",
+    "Journey",
+    "Logs",
     "Member",
     "Mentee",
     "Notification",
     "Path",
     "Plan",
+    "Products",
     "Resource",
 }
 
@@ -198,21 +203,14 @@ class TestProject(unittest.TestCase):
         mentee_card = CardService.project(
             CARD_TYPE_MENTEES, {"_id": source_id, "name": "Mentee"}
         )
-        self.assertEqual(mentee_card["link"], f"mentee/mentee/{source_id}")
+        self.assertEqual(mentee_card["link"], f"mentor/mentee/{source_id}")
 
-    def test_project_notification_link_flag(self):
+    def test_project_notification_always_sets_link(self):
         source_id = ObjectId()
         source = {"_id": source_id, "name": "N", "message": "msg"}
 
-        card_home = CardService.project(
-            CARD_TYPE_NOTIFICATIONS, source, notification_link=False
-        )
-        self.assertNotIn("link", card_home)
-
-        card_typed = CardService.project(
-            CARD_TYPE_NOTIFICATIONS, source, notification_link=True
-        )
-        self.assertEqual(card_typed["link"], f"discovery/notification/{source_id}")
+        card = CardService.project(CARD_TYPE_NOTIFICATIONS, source)
+        self.assertEqual(card["link"], f"discovery/notification/{source_id}")
 
     def test_project_event(self):
         source_id = ObjectId()
@@ -234,6 +232,7 @@ class TestProject(unittest.TestCase):
 
     def test_project_typed_sources_use_enum_values(self):
         expected = {
+            CARD_TYPE_CUSTOMER: "Customer",
             CARD_TYPE_EVENTS: "Event",
             CARD_TYPE_MEMBERS: "Member",
             CARD_TYPE_MENTEES: "Mentee",
@@ -251,10 +250,24 @@ class TestProject(unittest.TestCase):
                 self.assertEqual(card["type"], enum_value)
                 self.assertIn(card["type"], CARD_TYPE_ENUM)
 
-    def test_project_omits_type_for_sources_without_enum_value(self):
+    def test_project_customer_emits_type(self):
         card = CardService.project(CARD_TYPE_CUSTOMER, {"_id": ObjectId(), "name": "n"})
-        self.assertNotIn("type", card)
+        self.assertEqual(card["type"], "Customer")
+        self.assertIn(card["type"], CARD_TYPE_ENUM)
         self.assertTrue(set(card).issubset(CARD_PROPERTIES))
+
+    def test_synthetic_card_emits_type_and_link_without_id(self):
+        card = CardService._synthetic_card(
+            "Products",
+            "Manage subscription products",
+            "Products",
+            "admin/settings",
+        )
+        self.assertEqual(card["type"], "Products")
+        self.assertEqual(card["link"], "admin/settings")
+        self.assertNotIn("_id", card)
+        self.assertTrue(set(card).issubset(CARD_PROPERTIES))
+        self.assertIn(card["type"], CARD_TYPE_ENUM)
 
     def test_project_unknown_type_raises_bad_request(self):
         with self.assertRaises(HTTPBadRequest):
@@ -312,7 +325,7 @@ class TestHomeCardNotifications(HomeCardsTestCase):
         self.assertEqual(len(cards), 1)
         self.assertEqual(cards[0]["type"], "Notification")
         self.assertEqual(cards[0]["description"], "Hi")
-        self.assertNotIn("link", cards[0])
+        self.assertEqual(cards[0]["link"], f"discovery/notification/{cards[0]['_id']}")
 
     def test_notifications_scoped_to_token_profile_id(self):
         CardService.get_home_cards(token(profile_id=PROFILE_ID), BREADCRUMB)
@@ -340,7 +353,8 @@ class TestHomeCardAdmin(HomeCardsTestCase):
             {
                 "name": "Products",
                 "description": "Manage subscription products",
-                "link": "admin/products",
+                "type": "Products",
+                "link": "admin/settings",
             },
         )
         self.assertEqual(
@@ -348,7 +362,8 @@ class TestHomeCardAdmin(HomeCardsTestCase):
             {
                 "name": "Discounts",
                 "description": "Manage discount codes",
-                "link": "admin/discounts",
+                "type": "Discounts",
+                "link": "admin/settings?tab=discounts",
             },
         )
         self.assertEqual(
@@ -356,11 +371,12 @@ class TestHomeCardAdmin(HomeCardsTestCase):
             {
                 "name": "Logs",
                 "description": "View system logs",
+                "type": "Logs",
                 "link": "admin/logs",
             },
         )
         for card in cards:
-            self.assertNotIn("type", card)
+            self.assertIn(card["type"], CARD_TYPE_ENUM)
             self.assertNotIn("_id", card)
 
     def test_admin_omitted_without_admin_role(self):
@@ -385,7 +401,7 @@ class TestHomeCardCustomer(HomeCardsTestCase):
         self.assertEqual(cards[0]["name"], "Acme Corp")
         self.assertEqual(cards[0]["description"], "Acme customer")
         self.assertEqual(cards[0]["link"], f"customer/customer/{CUSTOMER_ID}")
-        self.assertNotIn("type", cards[0])
+        self.assertEqual(cards[0]["type"], "Customer")
 
     def test_customer_card_omitted_for_coordinator_only(self):
         self.mock_query.return_value = [
@@ -459,6 +475,7 @@ class TestHomeCardMentees(HomeCardsTestCase):
         )
 
         self.assertEqual([card["type"] for card in cards], ["Mentee", "Mentee"])
+        self.assertTrue(cards[0]["link"].startswith("mentor/mentee/"))
         self.mock_mentees.assert_called_once()
         _, kwargs = self.mock_mentees.call_args
         self.assertEqual(kwargs["sort_by"], [("saved.at_time", -1), ("_id", -1)])
@@ -515,10 +532,10 @@ class TestHomeCardMenteeJourney(HomeCardsTestCase):
             {
                 "name": "Learning Journey",
                 "description": "Continue your learning journey",
+                "type": "Journey",
                 "link": "mentee/journey",
             },
         )
-        self.assertNotIn("type", cards[0])
         self.assertNotIn("_id", cards[0])
 
     def test_learning_journey_omitted_without_mentee_role(self):
@@ -563,21 +580,27 @@ class TestHomeCardComposition(HomeCardsTestCase):
         # 8. Learning Journey
         self.assertEqual(len(cards), 11)
         self.assertEqual(cards[0]["type"], "Notification")
-        self.assertNotIn("link", cards[0])
+        self.assertEqual(cards[0]["link"], f"discovery/notification/{cards[0]['_id']}")
         self.assertEqual(cards[1]["type"], "Notification")
         self.assertEqual(cards[2]["name"], "Products")
-        self.assertEqual(cards[2]["link"], "admin/products")
+        self.assertEqual(cards[2]["type"], "Products")
+        self.assertEqual(cards[2]["link"], "admin/settings")
         self.assertEqual(cards[3]["name"], "Discounts")
-        self.assertEqual(cards[3]["link"], "admin/discounts")
+        self.assertEqual(cards[3]["type"], "Discounts")
+        self.assertEqual(cards[3]["link"], "admin/settings?tab=discounts")
         self.assertEqual(cards[4]["name"], "Logs")
+        self.assertEqual(cards[4]["type"], "Logs")
         self.assertEqual(cards[4]["link"], "admin/logs")
         self.assertEqual(cards[5]["name"], "Acme Corp")
+        self.assertEqual(cards[5]["type"], "Customer")
         self.assertEqual(cards[5]["link"], f"customer/customer/{CUSTOMER_ID}")
         self.assertEqual(cards[6]["type"], "Member")
         self.assertEqual(cards[7]["type"], "Member")
         self.assertEqual(cards[8]["type"], "Mentee")
+        self.assertTrue(cards[8]["link"].startswith("mentor/mentee/"))
         self.assertEqual(cards[9]["type"], "Mentee")
         self.assertEqual(cards[10]["name"], "Learning Journey")
+        self.assertEqual(cards[10]["type"], "Journey")
         self.assertEqual(cards[10]["link"], "mentee/journey")
 
     def test_offset_and_size_slice_the_combined_list(self):

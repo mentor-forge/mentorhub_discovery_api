@@ -32,12 +32,17 @@ BASE_URL = "http://localhost:8397"
 CARD_PROPERTIES = {"_id", "name", "description", "link", "type"}
 
 CARD_TYPE_ENUM = {
+    "Customer",
+    "Discounts",
     "Event",
+    "Journey",
+    "Logs",
     "Member",
     "Mentee",
     "Notification",
     "Path",
     "Plan",
+    "Products",
     "Resource",
 }
 
@@ -243,9 +248,16 @@ def test_home_cards_persona_mike_admin():
     # Mike has admin role and no profile notifications:
     # Expected synthetic cards: Products, Discounts, Logs
     synthetic_links = [c.get("link") for c in cards]
-    assert "admin/products" in synthetic_links
-    assert "admin/discounts" in synthetic_links
+    assert "admin/settings" in synthetic_links
+    assert "admin/settings?tab=discounts" in synthetic_links
     assert "admin/logs" in synthetic_links
+
+    products = next(c for c in cards if c.get("name") == "Products")
+    discounts = next(c for c in cards if c.get("name") == "Discounts")
+    logs = next(c for c in cards if c.get("name") == "Logs")
+    assert products.get("type") == "Products"
+    assert discounts.get("type") == "Discounts"
+    assert logs.get("type") == "Logs"
 
     # No customer / member / mentee / journey sections
     assert not any(c.get("link", "").startswith("customer/") for c in cards)
@@ -254,7 +266,7 @@ def test_home_cards_persona_mike_admin():
 
 @pytest.mark.e2e
 def test_home_cards_persona_daniel_mentee():
-    """Persona Daniel (mentee): Notification (no link), Learning Journey (mentee/journey)."""
+    """Persona Daniel (mentee): Notification with link, Learning Journey (type Journey)."""
     token = get_persona_token(PERSONA_DANIEL)
     response = requests.get(f"{BASE_URL}/api/cards", headers=_auth_headers(token))
     assert response.status_code == 200, _err(response, 200)
@@ -267,12 +279,11 @@ def test_home_cards_persona_daniel_mentee():
     last_card = cards[-1]
     assert last_card.get("name") == "Learning Journey"
     assert last_card.get("link") == "mentee/journey"
-    assert "type" not in last_card
+    assert last_card.get("type") == "Journey"
 
-    # If active notifications are seeded for Daniel, check first card has type Notification and no link
     notifications = [c for c in cards if c.get("type") == "Notification"]
     for notif in notifications:
-        assert "link" not in notif, f"Home notification must omit link: {notif}"
+        assert notif.get("link") == f"discovery/notification/{notif['_id']}"
 
     # No admin or customer links
     assert not any(c.get("link", "").startswith("admin/") for c in cards)
@@ -296,7 +307,7 @@ def test_home_cards_persona_stacey_customer():
     ]
     if customer_cards:
         cust_card = customer_cards[0]
-        assert "type" not in cust_card, "Customer card must omit type"
+        assert cust_card.get("type") == "Customer"
 
     # Member cards should have customer/profile/{id} links
     member_cards = [c for c in cards if c.get("type") == "Member"]
@@ -320,7 +331,7 @@ def test_home_cards_persona_emma_coordinator():
 
 @pytest.mark.e2e
 def test_home_cards_persona_paula_mentor():
-    """Persona Paula (mentor): Mentee cards with mentee/mentee/{id} links."""
+    """Persona Paula (mentor): Mentee cards with mentor/mentee/{id} links."""
     token = get_persona_token(PERSONA_PAULA)
     response = requests.get(f"{BASE_URL}/api/cards", headers=_auth_headers(token))
     assert response.status_code == 200, _err(response, 200)
@@ -330,7 +341,7 @@ def test_home_cards_persona_paula_mentor():
 
     mentee_cards = [c for c in cards if c.get("type") == "Mentee"]
     for m in mentee_cards:
-        assert m.get("link", "").startswith("mentee/mentee/")
+        assert m.get("link", "").startswith("mentor/mentee/")
 
 
 # =========================================================================
