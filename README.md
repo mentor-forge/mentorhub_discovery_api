@@ -82,7 +82,7 @@ See the [Open API Specifications](./docs/openapi.yaml) for details on the API.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/cards` | Composite home Card list (Notifications, then role-gated Products / Discounts / Logs, Customer, Members, Mentees, Learning Journey). Every card has `type` and a relative SPA `link`. |
-| `GET /api/cards/{type}` | Typed Card list — `events`, `notifications`, `paths`, `plans`, `resources` |
+| `GET /api/cards/{type}` | Typed Card list — `events`, `notifications`, `paths`, `plans`, `resources`. Event cards omit `link`; `name` is the Event `type` and `description` is Markdown with type, Profile `full_name`, and `created.at_time`. |
 | `GET /api/cards/notifications` | Notification Cards (`type: Notification`, `link: discovery/notification/{id}`). Query params `name` (contains) and `status` (`active` / `archived`) are **admin-only**; a non-admin caller that sends either receives `403`. |
 | `POST /api/notification` | Create a Notification (returns a Notification document, not a Card) |
 | `POST /api/notification/dismiss/{notification_id}` | Dismiss a Notification |

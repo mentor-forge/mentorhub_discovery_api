@@ -550,8 +550,8 @@ def test_typed_plans_links_mentor_prefix():
 
 
 @pytest.mark.e2e
-def test_typed_events_links_mentee_prefix():
-    """GET /api/cards/events emits type: Event and mentee/event/* links."""
+def test_typed_events_omit_link_and_include_type_name_time():
+    """GET /api/cards/events emits type: Event with no link and a description."""
     token = get_persona_token(PERSONA_DANIEL)
     response = requests.get(
         f"{BASE_URL}/api/cards/events", headers=_auth_headers(token)
@@ -563,4 +563,7 @@ def test_typed_events_links_mentee_prefix():
         pytest.skip("no seeded events")
     for c in cards:
         assert c.get("type") == "Event"
-        assert c.get("link", "").startswith("mentee/event/")
+        assert not c.get("link")
+        assert c.get("name")
+        assert c.get("description")
+        assert c["name"] in c["description"]

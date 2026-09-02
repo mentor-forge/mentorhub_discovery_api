@@ -17,6 +17,7 @@ from api_utils.services import EventService as SharedEventService
 from api_utils.services.event_service import DATE_PROPERTIES, EVENT_ID_PROPERTIES
 
 from src.services.card_service import CARD_TYPE_EVENTS, CardService
+from src.services.profile_service import ProfileService
 
 CARD_ACTIVITY_WINDOW_DAYS = 30
 
@@ -71,8 +72,67 @@ class EventCardService(EventService):
     Event consume surface projected onto the Card schema.
 
     Bound to `create_event_get_routes` so `/api/cards/events` returns `Card[]`;
-    the unprojected documents stay available on `EventService`.
+    the unprojected documents stay available on `EventService`. Event cards have
+    no `link`. Card `name` is the Event `type`; `description` is Markdown with
+    the Event `type`, Profile `full_name`, and `created.at_time`.
     """
+
+    @classmethod
+    def _event_profile_id(cls, event):
+        """Profile id on live ``context.profile_id`` or legacy top-level field."""
+        event = event or {}
+        context = event.get("context") or {}
+        return context.get("profile_id") or event.get("profile_id")
+
+    @classmethod
+    def _format_at_time(cls, value):
+        """Stringify ``created.at_time`` for Card description Markdown."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                value = value.astimezone(timezone.utc).replace(tzinfo=None)
+            text = value.isoformat()
+            if text.endswith("+00:00"):
+                return text[:-6] + "Z"
+            return text
+        return str(value)
+
+    @classmethod
+    def _event_description(cls, event_type, full_name, at_time):
+        """Markdown body: event type, profile full_name, and created.at_time."""
+        lines = []
+        if event_type:
+            lines.append(str(event_type))
+        if full_name:
+            lines.append(str(full_name))
+        formatted = cls._format_at_time(at_time)
+        if formatted:
+            lines.append(formatted)
+        if not lines:
+            return None
+        return "\n\n".join(lines)
+
+    @classmethod
+    def _enrich_events(cls, events):
+        """Copy each Event and set Card description from type, name, and time."""
+        events = events or []
+        names = ProfileService.full_names_for_ids(
+            [cls._event_profile_id(event) for event in events]
+        )
+        enriched = []
+        for event in events:
+            source = dict(event)
+            profile_id = cls._event_profile_id(event)
+            full_name = names.get(str(profile_id)) if profile_id is not None else None
+            created = event.get("created") or {}
+            description = cls._event_description(
+                event.get("type"), full_name, created.get("at_time")
+            )
+            if description:
+                source["description"] = description
+            enriched.append(source)
+        return enriched
 
     @classmethod
     def get_events(
@@ -99,4 +159,6 @@ class EventCardService(EventService):
             sort_by=sort_by,
             **kwargs,
         )
-        return CardService.project_all(CARD_TYPE_EVENTS, events, token=token)
+        return CardService.project_all(
+            CARD_TYPE_EVENTS, cls._enrich_events(events), token=token
+        )

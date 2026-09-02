@@ -48,7 +48,10 @@ class TestEventCardService(unittest.TestCase):
         with patch(
             "api_utils.services.event_service.EventService.get_events",
             return_value=events,
-        ) as mock_super:
+        ) as mock_super, patch(
+            "src.services.event_service.ProfileService.full_names_for_ids",
+            return_value={PROFILE_ID: "Jane Explorer"},
+        ) as mock_names:
             cards = EventCardService.get_events(
                 TOKEN, BREADCRUMB, profile_id=PROFILE_ID
             )
@@ -62,11 +65,16 @@ class TestEventCardService(unittest.TestCase):
             sort_by=None,
             profile_id=PROFILE_ID,
         )
+        mock_names.assert_called_once()
         self.assertEqual(len(cards), 1)
         self.assertEqual(cards[0]["_id"], event_id)
         self.assertEqual(cards[0]["name"], "login")
         self.assertEqual(cards[0]["type"], "Event")
-        self.assertEqual(cards[0]["link"], f"mentee/event/{event_id}")
+        self.assertNotIn("link", cards[0])
+        self.assertEqual(
+            cards[0]["description"],
+            "login\n\nJane Explorer\n\n2026-08-23T12:00:00",
+        )
 
     def test_get_events_passes_pagination_filters_sort(self):
         with patch(
@@ -89,6 +97,54 @@ class TestEventCardService(unittest.TestCase):
             size=20,
             filters={"type": ["login", "logout"]},
             sort_by=[("created.at_time", -1)],
+        )
+
+    def test_get_events_omits_missing_profile_name(self):
+        events = [
+            {
+                "_id": ObjectId(),
+                "type": "login",
+                "context": {"profile_id": PROFILE_ID},
+                "created": BREADCRUMB,
+            }
+        ]
+
+        with patch(
+            "api_utils.services.event_service.EventService.get_events",
+            return_value=events,
+        ), patch(
+            "src.services.event_service.ProfileService.full_names_for_ids",
+            return_value={},
+        ):
+            cards = EventCardService.get_events(TOKEN, BREADCRUMB)
+
+        self.assertEqual(cards[0]["description"], "login\n\n2026-08-23T12:00:00")
+        self.assertNotIn("link", cards[0])
+
+    def test_get_events_uses_top_level_profile_id_and_datetime_at_time(self):
+        at_time = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
+        events = [
+            {
+                "_id": ObjectId(),
+                "type": "completed",
+                "profile_id": PROFILE_ID,
+                "created": {"at_time": at_time},
+            }
+        ]
+
+        with patch(
+            "api_utils.services.event_service.EventService.get_events",
+            return_value=events,
+        ), patch(
+            "src.services.event_service.ProfileService.full_names_for_ids",
+            return_value={PROFILE_ID: "Pat Mentor"},
+        ) as mock_names:
+            cards = EventCardService.get_events(TOKEN, BREADCRUMB)
+
+        self.assertEqual(mock_names.call_args[0][0], [PROFILE_ID])
+        self.assertEqual(
+            cards[0]["description"],
+            "completed\n\nPat Mentor\n\n2026-08-23T12:00:00",
         )
 
 

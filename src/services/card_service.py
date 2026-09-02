@@ -146,8 +146,6 @@ class CardService:
                 card["link"] = f"customer/profile/{id_str}"
             elif card_type in (CARD_TYPE_MENTEE, CARD_TYPE_MENTEES):
                 card["link"] = f"mentor/mentee/{id_str}"
-            elif card_type in (CARD_TYPE_EVENT, CARD_TYPE_EVENTS):
-                card["link"] = f"mentee/event/{id_str}"
             elif card_type == CARD_TYPE_CUSTOMER:
                 card["link"] = f"customer/customer/{id_str}"
             elif card_type == CARD_TYPE_RESOURCES:

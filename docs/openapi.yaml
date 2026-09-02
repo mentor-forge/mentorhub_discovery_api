@@ -33,7 +33,7 @@ info:
 
     For local development, obtain a JWT from the Developer Edition welcome / IdP flow, or use a
     test token from `test/e2e/e2e_auth.py` that matches your `JWT_SECRET` and expected claims.
-  version: 0.4.0
+  version: 0.5.0
   contact:
     name: Mentor Forge
     email: info@agile-learning-institute.com
@@ -321,7 +321,9 @@ paths:
       summary: Event cards
       description: |
         Returns Event Cards visible to the caller, scoped by outbound RBAC from the token. Each card
-        has `type: Event`, `name` set from the event `type`, and `link: "mentee/event/{id}"`.
+        has `type: Event` and `name` set from the event `type`. Cards omit `link`. `description` is
+        Markdown with the event `type`, the Profile `full_name` for `context.profile_id` (falling
+        back to Profile `name`), and `created.at_time`.
       operationId: getEventCards
       security:
         - bearerAuth: []

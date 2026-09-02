@@ -235,7 +235,7 @@ class TestProject(unittest.TestCase):
         self.assertEqual(card["_id"], source_id)
         self.assertEqual(card["name"], "login")
         self.assertEqual(card["type"], "Event")
-        self.assertEqual(card["link"], f"mentee/event/{source_id}")
+        self.assertNotIn("link", card)
         self.assertNotIn("context", card)
         self.assertNotIn("created", card)
 
