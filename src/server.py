@@ -39,7 +39,6 @@ app.json = MongoJSONEncoder(app)
 from api_utils import create_metric_routes, create_config_routes, create_explorer_routes
 from api_utils import (
     create_event_get_routes,
-    create_notification_get_routes,
     create_path_get_routes,
     create_plan_get_routes,
     create_resource_get_routes,
@@ -47,11 +46,11 @@ from api_utils import (
 
 from src.routes.card_routes import (
     create_cards_get_routes,
+    create_notification_card_get_routes,
     register_list_only_blueprint,
 )
 from src.routes.notification_routes import create_notification_routes
 from src.services.event_service import EventCardService
-from src.services.notification_service import NotificationCardService
 from src.services.path_service import PathCardService
 from src.services.plan_service import PlanCardService
 from src.services.resource_service import ResourceCardService
@@ -62,9 +61,10 @@ app.register_blueprint(create_explorer_routes(docs_dir), url_prefix="/docs")
 app.register_blueprint(create_config_routes(), url_prefix="/api/config")
 app.register_blueprint(create_cards_get_routes(), url_prefix="/api/cards")
 
-# Typed card lists: shared GET factories bound to Card-projecting subclasses.
-# Resource, Path, and Plan factories also mount a GET by-id rule, so they
-# register through register_list_only_blueprint to keep just the list rule.
+# Typed card lists: Resource/Path/Plan use shared GET factories (by-id rules
+# stripped via register_list_only_blueprint). Notifications use a local
+# list-only factory so admin name/status filters can be parsed. Events stay
+# on the shared list-only factory.
 register_list_only_blueprint(
     app,
     create_resource_get_routes(ResourceCardService, name="resource_card_routes"),
@@ -81,9 +81,7 @@ register_list_only_blueprint(
     "/api/cards/plans",
 )
 app.register_blueprint(
-    create_notification_get_routes(
-        NotificationCardService, name="notification_card_routes"
-    ),
+    create_notification_card_get_routes(),
     url_prefix="/api/cards/notifications",
 )
 app.register_blueprint(

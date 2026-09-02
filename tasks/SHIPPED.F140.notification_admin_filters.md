@@ -1,6 +1,6 @@
 # F140 – Admin-only Notification card filters
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Feature  
 **Depends On**: `F130_member_mentee_card_content`  
 **Description**: `GET /api/cards/notifications` must let **admin** callers filter by `name` and/or `status`. Non-admin callers keep the outbound-scoped unfiltered list and receive `403` if they send those query params. Notification cards already have `link` from F120. Home `GET /api/cards` stays pagination-only (no name/status filters).
@@ -96,3 +96,31 @@ Run all commands from this API repository root.
 The agent must not update files outside this list. Do not change OpenAPI. Do not change home composite content.
 
 ## Execution Notes
+
+### Plan (written before implementation)
+
+Shared `create_notification_get_routes` always calls `parse_list_request(request, {}, order_spec)` and never forwards filters. Discovery cannot change `api_utils`, so `/api/cards/notifications` will use a **local list-only** factory in `card_routes.py` (same HTTP shape as home: token, breadcrumb, `parse_list_request`, service, jsonify) and `server.py` will register that instead of the shared Notification GET factory.
+
+**Route:** `create_notification_card_get_routes` parses with `NOTIFICATION_CARD_LIST_FILTERS` + shared `NOTIFICATION_LIST_ORDER`. Empty `name`/`status` query keys are preserved in the `filters` dict (parse_filter_params drops them) so the service can 403 non-admins even for `?name=`. No by-id rule. RBAC is not in the route.
+
+**Service:** `NotificationCardService.get_notifications` gains `filters=`. Non-admin + any `name`/`status` key present → `HTTPForbidden` **before** any list query. Admin: `build_match_filter` of applicable (non-empty) filters AND’d with optional `match`, then `super().get_notifications(..., match=...)` so outbound + encode_document stay on the shared path and F120 Card projection (`type`/`link`) still wraps the result. Non-admin without those params: unfiltered list (outbound still applies). `NotificationService.get_notifications` / `get_active_notifications` / create-dismiss-cancel stay unchanged.
+
+**Tests:** service coverage for admin name/status/combined, non-admin 403 (including empty params, and assert the shared list is not called), non-admin unfiltered list, Card `link`. Dedicated `test/routes/test_notification_card_routes.py` for parsed filters, 403, 401, list-only URL map. Drop notifications from the shared-factory route table. `test_server.py` asserts list path and no by-id. Cheap e2e: admin `?name=` 200, mentee `?name=x` 403.
+
+**Not touching:** OpenAPI, Pipfile, api_utils, home composite content.
+
+### Implementation
+
+Local list-only `create_notification_card_get_routes` registered in `server.py` instead of `create_notification_get_routes`. `NotificationCardService.get_notifications(filters=)` enforces admin-only name/status (403 before query) and ANDs `build_match_filter` onto the shared list `match`. Home/control paths unchanged. Cards still F120 `type`/`link`. Endpoint remains list-only (no by-id rule).
+
+### Tests
+
+- `pipenv run test` — 204 passed, 58 deselected
+- `pipenv run lint` — pass (black on two new/edited test files)
+- `pipenv run build` — pass
+- `pipenv run container` — image `ghcr.io/mentor-forge/mentorhub_discovery_api:latest`
+- `pipenv run api` — db + discovery-api up (mh down stopped sibling containers, then brought mongodb + mongodb_api + discovery_api back)
+- `pipenv run e2e` — 58 passed, including admin `?name=Invite` 200 and mentee `?name=x` 403
+- `curl -s http://localhost:8397/docs/openapi.yaml` — 200, still 0.4.0 with F100 admin-only name/status
+
+Orchestrator confirmed unit/lint/build; `/api/cards/notifications` remains list-only.

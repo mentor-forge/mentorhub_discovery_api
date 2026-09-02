@@ -367,6 +367,35 @@ def test_typed_notifications_project_link():
 
 
 @pytest.mark.e2e
+def test_typed_notifications_admin_name_filter_ok():
+    """Admin GET /api/cards/notifications?name= is 200 with a Card array."""
+    token = get_persona_token(PERSONA_MIKE)
+    response = requests.get(
+        f"{BASE_URL}/api/cards/notifications",
+        headers=_auth_headers(token),
+        params={"name": "Invite"},
+    )
+    assert response.status_code == 200, _err(response, 200)
+    cards = response.json()
+    assert isinstance(cards, list)
+    for card in cards:
+        assert card.get("type") == "Notification"
+        assert "Invite".lower() in (card.get("name") or "").lower()
+
+
+@pytest.mark.e2e
+def test_typed_notifications_mentee_name_filter_forbidden():
+    """Mentee GET /api/cards/notifications?name=x is 403."""
+    token = get_persona_token(PERSONA_DANIEL)
+    response = requests.get(
+        f"{BASE_URL}/api/cards/notifications",
+        headers=_auth_headers(token),
+        params={"name": "x"},
+    )
+    assert response.status_code == 403, _err(response, 403)
+
+
+@pytest.mark.e2e
 def test_typed_resources_links_mentor_vs_mentee():
     """GET /api/cards/resources emits mentor/resource/* for Mentor, mentee/resource/* otherwise."""
     paula_token = get_persona_token(PERSONA_PAULA)

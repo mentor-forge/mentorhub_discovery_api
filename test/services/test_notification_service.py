@@ -16,6 +16,7 @@ from api_utils.services import NotificationService as SharedNotificationService
 from src.services.notification_service import (
     CANCELLED_FIELD,
     DISMISSED_FIELD,
+    NotificationCardService,
     NotificationService,
     active_match,
 )
@@ -349,6 +350,116 @@ class TestActiveNotifications(unittest.TestCase):
         _, kwargs = mock_get.call_args
         self.assertEqual(kwargs["match"]["profile_id"], PROFILE_ID)
         self.assertEqual(kwargs["match"][DISMISSED_FIELD], {"$exists": False})
+
+
+class TestNotificationCardFilters(unittest.TestCase):
+    """Admin-only name/status filters on the Card list; projection stays Cards."""
+
+    def setUp(self):
+        self.notifications = [profile_notification()]
+        patcher = patch(
+            "api_utils.services.notification_service.NotificationService"
+            ".get_notifications",
+            return_value=self.notifications,
+        )
+        self.addCleanup(patcher.stop)
+        self.mock_get = patcher.start()
+
+    def test_admin_name_filter_is_applied_as_contains_match(self):
+        cards = NotificationCardService.get_notifications(
+            {"user_id": "admin-user", "roles": ["admin"]},
+            BREADCRUMB,
+            filters={"name": "Invite"},
+        )
+
+        _, kwargs = self.mock_get.call_args
+        match = kwargs["match"]
+        self.assertEqual(match["name"]["$regex"], "Invite")
+        self.assertEqual(match["name"]["$options"], "i")
+        self.assertEqual(cards[0]["type"], "Notification")
+        self.assertEqual(
+            cards[0]["link"],
+            f"discovery/notification/{self.notifications[0]['_id']}",
+        )
+
+    def test_admin_status_filter_is_applied_as_in_list_match(self):
+        NotificationCardService.get_notifications(
+            {"user_id": "admin-user", "roles": ["admin"]},
+            BREADCRUMB,
+            filters={"status": ["active", "archived"]},
+        )
+
+        _, kwargs = self.mock_get.call_args
+        self.assertEqual(kwargs["match"]["status"], {"$in": ["active", "archived"]})
+
+    def test_admin_name_and_status_filters_and_together(self):
+        NotificationCardService.get_notifications(
+            {"user_id": "admin-user", "roles": ["admin"]},
+            BREADCRUMB,
+            filters={"name": "Invite", "status": ["active"]},
+        )
+
+        _, kwargs = self.mock_get.call_args
+        match = kwargs["match"]
+        self.assertEqual(match["name"]["$regex"], "Invite")
+        self.assertEqual(match["status"], {"$in": ["active"]})
+
+    def test_admin_empty_filter_values_do_not_become_match_clauses(self):
+        NotificationCardService.get_notifications(
+            {"user_id": "admin-user", "roles": ["admin"]},
+            BREADCRUMB,
+            filters={"name": "", "status": []},
+        )
+
+        _, kwargs = self.mock_get.call_args
+        self.assertIsNone(kwargs.get("match"))
+
+    def test_non_admin_with_name_filter_raises_forbidden_before_query(self):
+        with self.assertRaises(HTTPForbidden):
+            NotificationCardService.get_notifications(
+                profile_token(), BREADCRUMB, filters={"name": "Invite"}
+            )
+
+        self.mock_get.assert_not_called()
+
+    def test_non_admin_with_status_filter_raises_forbidden_before_query(self):
+        with self.assertRaises(HTTPForbidden):
+            NotificationCardService.get_notifications(
+                profile_token(), BREADCRUMB, filters={"status": ["active"]}
+            )
+
+        self.mock_get.assert_not_called()
+
+    def test_non_admin_with_empty_name_param_raises_forbidden(self):
+        with self.assertRaises(HTTPForbidden):
+            NotificationCardService.get_notifications(
+                profile_token(), BREADCRUMB, filters={"name": ""}
+            )
+
+        self.mock_get.assert_not_called()
+
+    def test_non_admin_without_filters_still_lists(self):
+        cards = NotificationCardService.get_notifications(profile_token(), BREADCRUMB)
+
+        self.mock_get.assert_called_once()
+        _, kwargs = self.mock_get.call_args
+        self.assertIsNone(kwargs.get("match"))
+        self.assertEqual(cards[0]["type"], "Notification")
+        self.assertEqual(
+            cards[0]["link"],
+            f"discovery/notification/{self.notifications[0]['_id']}",
+        )
+
+    def test_non_admin_filters_are_not_applied_even_if_rbac_were_skipped(self):
+        """Least privilege: Coordinator/Mentor/Mentee must not search by name."""
+        with self.assertRaises(HTTPForbidden):
+            NotificationCardService.get_notifications(
+                profile_token(roles=["coordinator"]),
+                BREADCRUMB,
+                filters={"name": "seats"},
+            )
+
+        self.mock_get.assert_not_called()
 
 
 if __name__ == "__main__":

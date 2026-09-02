@@ -7,10 +7,14 @@ token, builds the breadcrumb, parses the pagination headers, and hands off to
 factory, and it paginates only — the typed `/api/cards/{type}` lists carry the
 per-type filter and order parameters.
 
-Every typed Card list is a shared `create_*_get_routes` factory bound to a
+Most typed Card lists are a shared `create_*_get_routes` factory bound to a
 Card-projecting service subclass. Several of those shared factories also mount a
 GET by-id rule, which the Discovery Card contract does not include, so
 `server.py` registers them through `register_list_only_blueprint`.
+
+`GET /api/cards/notifications` is a local list-only factory: the shared
+Notification GET factory drops filters, and Discovery needs admin-only
+`name` / `status` query params without changing `api_utils`.
 """
 
 import logging
@@ -18,11 +22,19 @@ import logging
 from flask import Blueprint, jsonify, request
 
 from api_utils.flask_utils.breadcrumb import create_flask_breadcrumb
-from api_utils.flask_utils.list_request import parse_pagination_headers
+from api_utils.flask_utils.list_request import (
+    parse_list_request,
+    parse_pagination_headers,
+)
 from api_utils.flask_utils.route_wrapper import handle_route_exceptions
 from api_utils.flask_utils.token import create_flask_token
+from api_utils.services.notification_service import NOTIFICATION_LIST_ORDER
 
 from src.services.card_service import CardService
+from src.services.notification_service import (
+    NOTIFICATION_CARD_LIST_FILTERS,
+    NotificationCardService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,4 +99,33 @@ def create_cards_get_routes(*, name="card_routes"):
         return _json_ok(cards)
 
     logger.info("Card GET Flask Routes Registered")
+    return bp
+
+
+def create_notification_card_get_routes(*, name="notification_card_routes"):
+    """GET Notification cards (list-only). Admin-only name/status filters."""
+    bp = Blueprint(name, __name__)
+
+    @bp.route("", methods=["GET"])
+    @handle_route_exceptions
+    def get_notification_cards():
+        token, breadcrumb = _auth_context()
+        offset, size, filters, _ = parse_list_request(
+            request, NOTIFICATION_CARD_LIST_FILTERS, NOTIFICATION_LIST_ORDER
+        )
+        # parse_filter_params skips blanks; keep empty name/status so the
+        # service can 403 non-admins that sent those query params.
+        for key in NOTIFICATION_CARD_LIST_FILTERS:
+            if key in request.args and key not in filters:
+                filters[key] = request.args.get(key)
+        cards = NotificationCardService.get_notifications(
+            token, breadcrumb, offset=offset, size=size, filters=filters
+        )
+        logger.info(
+            f"get_notification_cards Success {breadcrumb['at_time']}, "
+            f"{breadcrumb['correlation_id']}"
+        )
+        return _json_ok(cards)
+
+    logger.info("Notification Card GET Flask Routes Registered")
     return bp
