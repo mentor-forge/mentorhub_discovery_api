@@ -1,6 +1,6 @@
 # F150 – README and seed-backed F-DA07 Card e2e
 
-**Status**: Pending  
+**Status**: Shipped  
 **Type**: Feature  
 **Depends On**: `F140_notification_admin_filters`  
 **Description**: Point README at the F-DA07 Card contract and lock home/typed Card behaviour to Developer Edition seed personas so e2e asserts types, links, Mentee presence, markdown Member/Mentee descriptions, and admin-only Notification filters.
@@ -79,3 +79,41 @@ Run all commands from this API repository root.
 The agent must not update files outside this list.
 
 ## Execution Notes
+
+### Plan (written before implementation)
+
+README is still the F094 Card surface: endpoint table and curls do not describe home composite `type`/`link` values, Notification `link` always on, or admin-only `name`/`status` on `GET /api/cards/notifications`. `src/server.py` log lines are already accurate (home, typed `{type}`, notification control) — leave them. `test_notification.py` never asserts home Notification `link` omission — leave it. `test_server.py` has no startup-log string assertions — leave it.
+
+`e2e_auth.py`: Paula already keeps `mentor_id` `A00000000000000000000010` (same as `profile_id`). Add a D110 comment that home Mentee cards also resolve from `profile_id` when `mentor_id` is absent. Do not drop `mentor_id`.
+
+`test_cards.py` already has F100 `CARD_TYPE_ENUM`, persona home stubs, typed Resource/Path/Plan/Event links, Daniel notification links, admin `?name=Invite` 200, mentee `?name=x` 403. Fill the F150 gaps without weakening `_assert_card_shape`:
+
+- Mike: assert Products/Discounts/Logs `type` + links; no Customer/Member/Mentee/Journey types (not just prefix checks).
+- Daniel: keep Journey trailing card + Notification `link`; add mentee `?status=` → 403.
+- Stacey: skip if Customer seed missing; Member cards get Progress (Library/Now/Next) + Activity (30 days) markdown, skip if no Members.
+- Emma: no Customer singleton; same Member markdown when Members exist.
+- Paula (D110 proof): if home returns Mentee cards, each `type: Mentee`, `link: mentor/mentee/{id}`, markdown Activity (30 days) + Notes. If zero cards, skip with a missing-seed reason — Discovery has no Profile list, so seed Profiles cannot be detected cheaply over HTTP.
+- All home persona tests: any Notification card must include `link discovery/notification/{id}`; use `size: 100` so pagination does not hide trailing Journey.
+- Admin `?status=active` (and existing `?name=Invite`): 200 + Card array; skip when the filter matches nothing; do not fake data.
+
+### Implementation
+
+- `README.md`: endpoint table now describes home composite `type`/`link` values, typed lists, Notification control, and admin-only `name`/`status` on `GET /api/cards/notifications` (non-admin `403`). Curl examples mint admin + Daniel tokens and exercise those filters.
+- `test/e2e/e2e_auth.py`: Paula still has `mentor_id`; comment notes home also works from `profile_id` (D110).
+- `test/e2e/test_cards.py`: persona home helpers (`size: 100`, Notification `link` always on); Mike Products/Discounts/Logs types + no Customer/Member/Mentee/Journey; Daniel Journey + links; Stacey Customer (hex-case-insensitive `_id`) + Member markdown; Emma Member markdown, no Customer; Paula Mentee presence + `mentor/mentee/{id}` + Activity/Notes markdown (skip if no seed mentees); admin `?status=active` 200; mentee `?status=` 403. `_assert_card_shape` still rejects extra properties.
+- Left unchanged: `src/server.py`, `test/e2e/test_notification.py`, `test/test_server.py`.
+
+### Tests
+
+| Command | Result |
+| --- | --- |
+| `pipenv run format && pipenv run lint` | Pass |
+| `pipenv run test` | 204 passed, 60 deselected |
+| `pipenv run build` | Pass |
+| `pipenv run container` | Image `ghcr.io/mentor-forge/mentorhub_discovery_api:latest` |
+| `pipenv run api` | `mh start down` then `mh start up discovery-api` (db + API back) |
+| `pipenv run e2e` | **60 passed**, 0 skipped. Paula mentee home **passed** (seed mentees present; D110 proven). Stacey/Emma Member markdown passed. Admin Invite + `status=active` passed. Daniel `?name=` and `?status=` 403 passed. |
+| `curl -s http://localhost:8397/docs/openapi.yaml` | `info.version` `0.4.0`; Card type enum includes Journey, Products, Customer, Discounts, Logs |
+| README curl spot-check | `/api/config` 200; home admin Products/Discounts/Logs + Notification `discovery/notification/{id}`; resources 200 array; `?status=active` 200; `?name=Invite` → MemberInvite/InviteMember; Daniel `?name=x` 403 |
+
+Orchestrator confirmed unit/lint/build. Pre-PR QA gate runs after this commit.

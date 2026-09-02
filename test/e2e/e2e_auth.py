@@ -54,6 +54,7 @@ PERSONA_EMMA = {
     "customer_id": "D00000000000000000000002",
 }
 
+# Home Mentee cards also resolve from profile_id when mentor_id is absent (D110).
 PERSONA_PAULA = {
     "sub": "paula",
     "profile_id": "A00000000000000000000010",
