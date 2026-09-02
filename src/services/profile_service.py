@@ -21,6 +21,7 @@ from api_utils.mongo_utils.list_query import (
 )
 from api_utils.services import ProfileService as SharedProfileService
 from api_utils.services.profile_service import (
+    ARCHIVED_STATUS,
     DATE_PROPERTIES,
     ID_PROPERTIES,
     PROFILE_LIST_FILTERS,
@@ -31,9 +32,16 @@ logger = logging.getLogger(__name__)
 
 
 def mentor_scope_id(token):
-    """Mentor identity: token ``mentor_id``, else ``profile_id`` (first present wins)."""
+    """The caller's Profile ``_id`` used to find Mentee Profiles.
+
+    Developer Edition ``login.html`` / ``welcome-auth.js`` mint mentor JWTs
+    with ``roles`` containing ``mentor``, ``profile_id`` set to the mentor's
+    Profile ``_id``, and ``mentor_id`` empty. Seed mentee Profiles store that
+    same id on ``mentor_id``. The ``mentor_id`` *claim* is the caller's mentor
+    (used on mentee tokens) and must not scope this list.
+    """
     token = token or {}
-    return token.get("mentor_id") or token.get("profile_id")
+    return token.get("profile_id") or None
 
 
 # `card_service` imports this module to assemble the composite home list, so the
@@ -160,12 +168,14 @@ class ProfileService(SharedProfileService):
         sort_by=None,
     ):
         """
-        Get the Profiles mentored by the token mentor identity.
+        Get Profiles whose ``mentor_id`` equals the token ``profile_id``.
 
-        Scopes with ``mentor_id`` when present, otherwise ``profile_id``
-        (same fallback as shared Profile outbound). Returns an empty list
-        when neither claim is set. Role gating for the composite home list
-        lives on CardService.
+        This is the Mentor home list: login.html mentor personas (Marti,
+        Paula, Elon, Danny, Melinda) carry ``profile_id`` and an empty
+        ``mentor_id`` claim. Do not AND shared Profile identity ``$or`` —
+        that clause uses the ``mentor_id`` *claim* and would miss mentees.
+
+        Archived Profiles stay hidden. Role gating lives on CardService.
 
         Args:
             token: Authentication token
@@ -178,13 +188,40 @@ class ProfileService(SharedProfileService):
         Returns:
             list: Profile documents for the caller's mentees
         """
-        return cls._scoped_profiles(
-            token,
-            breadcrumb,
-            "mentor_id",
-            mentor_scope_id(token),
-            offset,
-            size,
-            filters,
-            sort_by,
+        cls._check_permission(token, "read")
+
+        profile_id = mentor_scope_id(token)
+        if not profile_id:
+            return []
+
+        scope = {"mentor_id": profile_id}
+        encode_document(scope, ID_PROPERTIES, DATE_PROPERTIES)
+
+        match = and_match(
+            build_match_filter(
+                {"status": {"$ne": ARCHIVED_STATUS}},
+                filters or {},
+                PROFILE_LIST_FILTERS,
+            ),
+            scope,
         )
+        if sort_by is None:
+            default = PROFILE_LIST_ORDER["default"]
+            sort_by = build_sort_by(
+                default["field"], default["order"], PROFILE_LIST_ORDER
+            )
+
+        config = Config.get_instance()
+        profiles = execute_list_query(
+            config.PROFILE_COLLECTION_NAME,
+            match=match,
+            sort_by=sort_by,
+            offset=offset,
+            size=size,
+        )
+
+        logger.info(
+            f"Retrieved {len(profiles)} mentee profiles for mentor "
+            f"{profile_id} user {token.get('user_id')}"
+        )
+        return profiles

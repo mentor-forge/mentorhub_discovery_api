@@ -54,12 +54,22 @@ PERSONA_EMMA = {
     "customer_id": "D00000000000000000000002",
 }
 
-# Home Mentee cards also resolve from profile_id when mentor_id is absent (D110).
+# Home Mentee cards match Profile.mentor_id to login.html profile_id
+# (mentor JWTs leave the mentor_id claim empty).
 PERSONA_PAULA = {
     "sub": "paula",
     "profile_id": "A00000000000000000000010",
     "roles": ["mentor"],
-    "mentor_id": "A00000000000000000000010",
+    "customer_id": "",
+    "mentor_id": "",
+}
+
+PERSONA_MARTI = {
+    "sub": "marti",
+    "profile_id": "A00000000000000000000006",
+    "roles": ["mentor"],
+    "customer_id": "",
+    "mentor_id": "",
 }
 
 

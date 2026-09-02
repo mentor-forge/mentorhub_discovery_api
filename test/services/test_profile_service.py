@@ -1,9 +1,9 @@
 """
 Unit tests for Discovery ProfileService mentee identity scope.
 
-`get_mentee_profiles` scopes the `mentor_id` match with `mentor_scope_id`:
-token `mentor_id` when present, otherwise `profile_id`. The id is encoded
-with `encode_document` immediately before MongoIO / `execute_list_query`.
+`get_mentee_profiles` matches Profile.mentor_id to token.profile_id.
+login.html mentor JWTs leave the mentor_id claim empty; that claim must not
+scope the list. The id is encoded with encode_document before MongoIO.
 Role gating lives on CardService, not here.
 """
 
@@ -15,7 +15,8 @@ from bson import ObjectId
 from src.services.profile_service import ProfileService, mentor_scope_id
 
 PROFILE_ID = "665f1c2a9b1e4c0a1b2c3d01"
-MENTOR_ID = "665f1c2a9b1e4c0a1b2c3d04"
+MENTOR_CLAIM = "665f1c2a9b1e4c0a1b2c3d04"
+MARTI_PROFILE_ID = "A00000000000000000000006"
 
 BREADCRUMB = {
     "from_ip": "127.0.0.1",
@@ -32,24 +33,28 @@ def token(**claims):
 
 
 class TestMentorScopeId(unittest.TestCase):
-    """mentor_scope_id prefers mentor_id, then profile_id."""
+    """mentor_scope_id is the caller's Profile _id (login.html profile_id)."""
 
-    def test_mentor_id_wins_over_profile_id(self):
+    def test_uses_profile_id_even_when_mentor_id_claim_is_set(self):
         self.assertEqual(
-            mentor_scope_id({"mentor_id": MENTOR_ID, "profile_id": PROFILE_ID}),
-            MENTOR_ID,
+            mentor_scope_id({"mentor_id": MENTOR_CLAIM, "profile_id": PROFILE_ID}),
+            PROFILE_ID,
         )
 
-    def test_falls_back_to_profile_id(self):
-        self.assertEqual(mentor_scope_id({"profile_id": PROFILE_ID}), PROFILE_ID)
+    def test_empty_mentor_id_claim_uses_profile_id(self):
+        self.assertEqual(
+            mentor_scope_id({"mentor_id": "", "profile_id": MARTI_PROFILE_ID}),
+            MARTI_PROFILE_ID,
+        )
 
-    def test_missing_both_returns_none(self):
+    def test_missing_profile_id_returns_none(self):
+        self.assertIsNone(mentor_scope_id({"mentor_id": MENTOR_CLAIM}))
         self.assertIsNone(mentor_scope_id({}))
         self.assertIsNone(mentor_scope_id(None))
 
 
 class TestGetMenteeProfiles(unittest.TestCase):
-    """get_mentee_profiles encodes the resolved scope id into the mentor_id match."""
+    """get_mentee_profiles encodes token.profile_id into the mentor_id match."""
 
     def setUp(self):
         self.config = MagicMock()
@@ -60,21 +65,14 @@ class TestGetMenteeProfiles(unittest.TestCase):
             return_value=self.config,
         )
         query_patcher = patch("src.services.profile_service.execute_list_query")
-        outbound_patcher = patch.object(
-            ProfileService,
-            "_outbound_match",
-            return_value={"status": {"$ne": "archived"}},
-        )
         permission_patcher = patch.object(ProfileService, "_check_permission")
 
         self.addCleanup(config_patcher.stop)
         self.addCleanup(query_patcher.stop)
-        self.addCleanup(outbound_patcher.stop)
         self.addCleanup(permission_patcher.stop)
 
         config_patcher.start()
         self.mock_query = query_patcher.start()
-        outbound_patcher.start()
         permission_patcher.start()
 
         self.mock_query.return_value = []
@@ -89,7 +87,7 @@ class TestGetMenteeProfiles(unittest.TestCase):
                 return clause["mentor_id"]
         self.fail(f"mentor_id not found in match: {match}")
 
-    def test_encodes_profile_id_when_mentor_id_absent(self):
+    def test_encodes_profile_id_as_mentor_id_match(self):
         ProfileService.get_mentee_profiles(token(profile_id=PROFILE_ID), BREADCRUMB)
 
         self.mock_query.assert_called_once()
@@ -97,17 +95,34 @@ class TestGetMenteeProfiles(unittest.TestCase):
         _, kwargs = self.mock_query.call_args
         self.assertEqual(kwargs["match"]["status"], {"$ne": "archived"})
 
-    def test_encodes_mentor_id_when_present(self):
+    def test_login_html_empty_mentor_id_uses_profile_id(self):
         ProfileService.get_mentee_profiles(
-            token(mentor_id=MENTOR_ID, profile_id=PROFILE_ID), BREADCRUMB
+            token(
+                user_id="marti",
+                roles=["mentor"],
+                profile_id=MARTI_PROFILE_ID,
+                customer_id="",
+                mentor_id="",
+            ),
+            BREADCRUMB,
         )
 
         self.mock_query.assert_called_once()
-        self.assertEqual(self._mentor_id_in_match(), ObjectId(MENTOR_ID))
-        self.assertNotEqual(self._mentor_id_in_match(), ObjectId(PROFILE_ID))
+        self.assertEqual(self._mentor_id_in_match(), ObjectId(MARTI_PROFILE_ID))
 
-    def test_empty_list_when_scope_id_missing(self):
-        profiles = ProfileService.get_mentee_profiles(token(), BREADCRUMB)
+    def test_ignores_token_mentor_id_claim(self):
+        ProfileService.get_mentee_profiles(
+            token(mentor_id=MENTOR_CLAIM, profile_id=PROFILE_ID), BREADCRUMB
+        )
+
+        self.mock_query.assert_called_once()
+        self.assertEqual(self._mentor_id_in_match(), ObjectId(PROFILE_ID))
+        self.assertNotEqual(self._mentor_id_in_match(), ObjectId(MENTOR_CLAIM))
+
+    def test_empty_list_when_profile_id_missing(self):
+        profiles = ProfileService.get_mentee_profiles(
+            token(mentor_id=MENTOR_CLAIM), BREADCRUMB
+        )
 
         self.mock_query.assert_not_called()
         self.assertEqual(profiles, [])

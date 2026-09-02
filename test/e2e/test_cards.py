@@ -19,6 +19,7 @@ import requests
 from .e2e_auth import (
     PERSONA_DANIEL,
     PERSONA_EMMA,
+    PERSONA_MARTI,
     PERSONA_MIKE,
     PERSONA_PAULA,
     PERSONA_STACEY,
@@ -104,7 +105,9 @@ ADMIN_EXCLUDED_HOME_TYPES = {
     "Journey",
 }
 
-PAULA_MENTOR_SCOPE_ID = PERSONA_PAULA["mentor_id"]
+PAULA_PROFILE_ID = PERSONA_PAULA["profile_id"]
+MARTI_PROFILE_ID = PERSONA_MARTI["profile_id"]
+MARY_MENTEE_NAME = "Mary Anderson"
 
 
 def _assert_card_shape(cards):
@@ -363,16 +366,31 @@ def test_home_cards_persona_emma_coordinator():
 
 
 @pytest.mark.e2e
+def test_home_cards_persona_marti_mentor():
+    """login.html Marti (mentor): mentee Profiles with mentor_id = her profile_id."""
+    cards = _home_cards(get_persona_token(PERSONA_MARTI))
+
+    mentee_cards = [c for c in cards if c.get("type") == "Mentee"]
+    assert mentee_cards, (
+        "Marti should receive Mentee cards for Profiles whose mentor_id is "
+        f"{MARTI_PROFILE_ID} (seed: Mary Anderson)"
+    )
+    names = {c.get("name") for c in mentee_cards}
+    assert MARY_MENTEE_NAME in names, f"expected {MARY_MENTEE_NAME} in {names}"
+    assert "Linda Left" not in names, "archived mentee must stay hidden"
+    for card in mentee_cards:
+        assert card.get("link", "").startswith("mentor/mentee/")
+        _assert_mentee_markdown(card)
+
+
+@pytest.mark.e2e
 def test_home_cards_persona_paula_mentor():
-    """Persona Paula (mentor): Mentee cards when seed mentees exist (D110)."""
+    """login.html Paula (mentor): Mentee cards for Profiles with her profile_id."""
     cards = _home_cards(get_persona_token(PERSONA_PAULA))
 
     mentee_cards = [c for c in cards if c.get("type") == "Mentee"]
     if not mentee_cards:
-        pytest.skip(
-            "no seeded mentee Profiles for mentor_id/profile_id "
-            f"{PAULA_MENTOR_SCOPE_ID}"
-        )
+        pytest.skip("no seeded mentee Profiles for mentor_id " f"{PAULA_PROFILE_ID}")
     for card in mentee_cards:
         assert card.get("link", "").startswith("mentor/mentee/")
         _assert_mentee_markdown(card)

@@ -308,7 +308,7 @@ class CardService:
         4. Admin synthetic: Logs
         5. Customer singleton for token `customer_id` (Customer role only)
         6. Members for token `customer_id` (Customer or Coordinator roles only, newest saved first)
-        7. Mentees for token `mentor_id` or `profile_id` (Mentor role only, newest saved first)
+        7. Mentees whose Profile.mentor_id equals token profile_id (Mentor role only, newest saved first)
         8. Mentee synthetic: Learning Journey
 
         `offset`/`size` apply to the combined list.
@@ -396,7 +396,7 @@ class CardService:
             )
             cards.extend(cls._project_member_cards(members, token, breadcrumb))
 
-        # 7. Mentee cards for Profiles with token mentor_id or profile_id, saved.at_time desc
+        # 7. Mentee cards for Profiles with mentor_id = token.profile_id (login.html mentors)
         if config.ROLE_MENTOR in roles and mentor_scope_id(token):
             saved_desc = build_sort_by("saved.at_time", "desc", PROFILE_LIST_ORDER)
             mentees = ProfileService.get_mentee_profiles(

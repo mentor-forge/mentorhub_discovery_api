@@ -498,7 +498,7 @@ class TestHomeCardMentees(HomeCardsTestCase):
         self.mock_mentees.return_value = documents("mentee", 2)
 
         cards = CardService.get_home_cards(
-            token(roles=["mentor"], mentor_id=MENTOR_ID), BREADCRUMB
+            token(roles=["mentor"], profile_id=PROFILE_ID), BREADCRUMB
         )
 
         self.assertEqual([card["type"] for card in cards], ["Mentee", "Mentee"])
@@ -511,7 +511,7 @@ class TestHomeCardMentees(HomeCardsTestCase):
         self.mock_mentees.return_value = documents("mentee", 2)
 
         cards = CardService.get_home_cards(
-            token(roles=["mentor"], profile_id=PROFILE_ID), BREADCRUMB
+            token(roles=["mentor"], profile_id=PROFILE_ID, mentor_id=""), BREADCRUMB
         )
 
         self.assertEqual([card["type"] for card in cards], ["Mentee", "Mentee"])
@@ -519,7 +519,7 @@ class TestHomeCardMentees(HomeCardsTestCase):
         _, kwargs = self.mock_mentees.call_args
         self.assertEqual(kwargs["sort_by"], [("saved.at_time", -1), ("_id", -1)])
 
-    def test_mentees_included_when_mentor_id_wins_over_profile_id(self):
+    def test_mentees_included_when_profile_id_wins_over_mentor_id_claim(self):
         self.mock_mentees.return_value = documents("mentee", 1)
 
         cards = CardService.get_home_cards(
@@ -534,14 +534,17 @@ class TestHomeCardMentees(HomeCardsTestCase):
         self.mock_mentees.return_value = documents("mentee", 3)
 
         cards = CardService.get_home_cards(
-            token(roles=["customer"], mentor_id=MENTOR_ID), BREADCRUMB
+            token(roles=["customer"], mentor_id=MENTOR_ID, profile_id=PROFILE_ID),
+            BREADCRUMB,
         )
 
         self.mock_mentees.assert_not_called()
         self.assertEqual([c for c in cards if c.get("type") == "Mentee"], [])
 
-    def test_mentees_omitted_without_scope_id(self):
-        cards = CardService.get_home_cards(token(roles=["mentor"]), BREADCRUMB)
+    def test_mentees_omitted_without_profile_id(self):
+        cards = CardService.get_home_cards(
+            token(roles=["mentor"], mentor_id=MENTOR_ID), BREADCRUMB
+        )
 
         self.mock_mentees.assert_not_called()
         self.assertEqual(cards, [])
@@ -867,7 +870,7 @@ class TestHomeCardMenteeMarkdown(HomeCardsTestCase):
         self.mock_notes.return_value = [{"note": "Ask about the path"}]
 
         cards = CardService.get_home_cards(
-            token(roles=["mentor"], mentor_id=MENTOR_ID), BREADCRUMB
+            token(roles=["mentor"], profile_id=PROFILE_ID, mentor_id=""), BREADCRUMB
         )
 
         self.assertEqual(len(cards), 1)
@@ -884,7 +887,7 @@ class TestHomeCardMenteeMarkdown(HomeCardsTestCase):
         self.mock_mentees.return_value = documents("mentee", 1)
 
         cards = CardService.get_home_cards(
-            token(roles=["mentor"], mentor_id=MENTOR_ID), BREADCRUMB
+            token(roles=["mentor"], profile_id=PROFILE_ID, mentor_id=""), BREADCRUMB
         )
 
         description = cards[0]["description"]
@@ -897,7 +900,7 @@ class TestHomeCardMenteeMarkdown(HomeCardsTestCase):
         self.mock_mentees.return_value = documents("mentee", 1)
 
         CardService.get_home_cards(
-            token(roles=["mentor"], mentor_id=MENTOR_ID), BREADCRUMB
+            token(roles=["mentor"], profile_id=PROFILE_ID, mentor_id=""), BREADCRUMB
         )
 
         self.mock_notes.assert_called_once()
