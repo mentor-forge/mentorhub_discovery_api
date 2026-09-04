@@ -65,7 +65,7 @@ pipenv run lint
 
 ## api-utils notes
 
-This API pins **`api-utils==1.0.1`** from CodeArtifact. In 1.0.1, list GETs return a plain JSON
+This API pins **`api-utils==1.0.2`** from CodeArtifact. Since 1.0.1, list GETs return a plain JSON
 **array** and paginate with the `offset` and `size` **request headers** (defaults `0` / `20`, max
 `100`) — there is no cursor envelope and no infinite-scroll helper. MongoDB I/O goes through
 `MongoIO` (`get_document`, `get_documents`, `create_document`, `update_document`,
