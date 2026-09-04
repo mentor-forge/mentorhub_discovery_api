@@ -21,19 +21,23 @@ _DEFAULT_JWT_ALGORITHM = "HS256"
 _E2E_SUBJECT = "adam"
 _E2E_ROLES = ("admin",)
 
-# api-utils 1.0.0 rejects a token without a ``profile_id`` claim, so the persona
+# api-utils 1.0.1 rejects a token without a ``profile_id`` claim, so the persona
 # needs one. Matches the seeded admin Profile id (Profile.0.1.0.0 test data).
+# Flask-token display is ``display_name`` (JWT claim ``display_name`` or ``name``).
 _E2E_PROFILE_ID = "A00000000000000000000001"
+_E2E_DISPLAY_NAME = "Adam"
 
-# Developer Edition seed persona configurations
+# Developer Edition seed persona configurations (display_name from login.html).
 PERSONA_MIKE = {
     "sub": "mike",
+    "display_name": "Mike Storey",
     "profile_id": "A00000000000000000000001",
     "roles": ["admin"],
 }
 
 PERSONA_DANIEL = {
     "sub": "daniel",
+    "display_name": "Daniel Dissler",
     "profile_id": "A00000000000000000000002",
     "roles": ["mentee"],
     "customer_id": "D00000000000000000000002",
@@ -42,6 +46,7 @@ PERSONA_DANIEL = {
 
 PERSONA_STACEY = {
     "sub": "stacey",
+    "display_name": "Stacey CEO",
     "profile_id": "A00000000000000000000008",
     "roles": ["customer"],
     "customer_id": "D00000000000000000000002",
@@ -49,6 +54,7 @@ PERSONA_STACEY = {
 
 PERSONA_EMMA = {
     "sub": "emma",
+    "display_name": "Emma Coordinator",
     "profile_id": "A00000000000000000000007",
     "roles": ["coordinator"],
     "customer_id": "D00000000000000000000002",
@@ -58,6 +64,7 @@ PERSONA_EMMA = {
 # (mentor JWTs leave the mentor_id claim empty).
 PERSONA_PAULA = {
     "sub": "paula",
+    "display_name": "Paula Persevere",
     "profile_id": "A00000000000000000000010",
     "roles": ["mentor"],
     "customer_id": "",
@@ -66,6 +73,7 @@ PERSONA_PAULA = {
 
 PERSONA_MARTI = {
     "sub": "marti",
+    "display_name": "Marti Lombardi",
     "profile_id": "A00000000000000000000006",
     "roles": ["mentor"],
     "customer_id": "",
@@ -94,6 +102,7 @@ def get_auth_token(**claims) -> str:
         "exp": now + 10 * 365 * 24 * 60 * 60,
         "roles": list(_E2E_ROLES),
         "profile_id": _E2E_PROFILE_ID,
+        "display_name": _E2E_DISPLAY_NAME,
     }
     payload.update(claims)
     token = jwt.encode(payload, secret, algorithm=algorithm)

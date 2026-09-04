@@ -322,8 +322,8 @@ paths:
       description: |
         Returns Event Cards visible to the caller, scoped by outbound RBAC from the token. Each card
         has `type: Event` and `name` set from the event `type`. Cards omit `link`. `description` is
-        Markdown with the event `type`, the Profile `full_name` for `context.profile_id` (falling
-        back to Profile `name`), and `created.at_time`.
+        Markdown with the event `type`, the Profile `display_name` for
+        `context.profile_id`, and `created.at_time`.
       operationId: getEventCards
       security:
         - bearerAuth: []
@@ -571,11 +571,11 @@ components:
       description: Case-insensitive `contains` filter on the name
       schema:
         type: string
-    FullNameContainsQuery:
-      name: full_name
+    DisplayNameContainsQuery:
+      name: display_name
       in: query
       required: false
-      description: Case-insensitive `contains` filter on the full name
+      description: Case-insensitive `contains` filter on the Profile display name
       schema:
         type: string
     EmailContainsQuery:
@@ -613,10 +613,9 @@ components:
       description: Field to sort by
       schema:
         type: string
-        default: name
+        default: display_name
         enum:
-          - name
-          - full_name
+          - display_name
           - email
           - status
           - created.at_time

@@ -137,18 +137,18 @@ class TestProject(unittest.TestCase):
         self.assertEqual(card["description"], "Hello there")
         self.assertEqual(card["type"], "Notification")
 
-    def test_project_member_prefers_full_name(self):
-        source = {"_id": ObjectId(), "name": "jdoe", "full_name": "Jane Doe"}
+    def test_project_member_uses_display_name(self):
+        source = {"_id": ObjectId(), "display_name": "Jane Doe"}
 
         card = CardService.project(CARD_TYPE_MEMBERS, source)
 
         self.assertEqual(card["name"], "Jane Doe")
         self.assertEqual(card["type"], "Member")
 
-    def test_project_member_falls_back_to_name(self):
+    def test_project_member_does_not_use_stale_name(self):
         card = CardService.project(CARD_TYPE_MEMBERS, {"_id": ObjectId(), "name": "j"})
 
-        self.assertEqual(card["name"], "j")
+        self.assertNotIn("name", card)
 
     def test_project_member_keeps_source_description(self):
         """project is a pure field map; enrichment happens before it is called."""
@@ -793,7 +793,7 @@ class TestHomeCardMemberMarkdown(HomeCardsTestCase):
         self.mock_members.return_value = [
             {
                 "_id": ObjectId(),
-                "full_name": "Jane Doe",
+                "display_name": "Jane Doe",
                 "description": "original prose",
             }
         ]
@@ -862,7 +862,7 @@ class TestHomeCardMenteeMarkdown(HomeCardsTestCase):
         self.mock_mentees.return_value = [
             {
                 "_id": ObjectId(),
-                "full_name": "Daniel",
+                "display_name": "Daniel",
                 "description": "original prose",
             }
         ]

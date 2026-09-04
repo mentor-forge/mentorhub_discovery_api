@@ -49,7 +49,7 @@ class TestEventCardService(unittest.TestCase):
             "api_utils.services.event_service.EventService.get_events",
             return_value=events,
         ) as mock_super, patch(
-            "src.services.event_service.ProfileService.full_names_for_ids",
+            "src.services.event_service.ProfileService.display_names_for_ids",
             return_value={PROFILE_ID: "Jane Explorer"},
         ) as mock_names:
             cards = EventCardService.get_events(
@@ -99,7 +99,7 @@ class TestEventCardService(unittest.TestCase):
             sort_by=[("created.at_time", -1)],
         )
 
-    def test_get_events_omits_missing_profile_name(self):
+    def test_get_events_omits_missing_profile_display_name(self):
         events = [
             {
                 "_id": ObjectId(),
@@ -113,7 +113,7 @@ class TestEventCardService(unittest.TestCase):
             "api_utils.services.event_service.EventService.get_events",
             return_value=events,
         ), patch(
-            "src.services.event_service.ProfileService.full_names_for_ids",
+            "src.services.event_service.ProfileService.display_names_for_ids",
             return_value={},
         ):
             cards = EventCardService.get_events(TOKEN, BREADCRUMB)
@@ -136,7 +136,7 @@ class TestEventCardService(unittest.TestCase):
             "api_utils.services.event_service.EventService.get_events",
             return_value=events,
         ), patch(
-            "src.services.event_service.ProfileService.full_names_for_ids",
+            "src.services.event_service.ProfileService.display_names_for_ids",
             return_value={PROFILE_ID: "Pat Mentor"},
         ) as mock_names:
             cards = EventCardService.get_events(TOKEN, BREADCRUMB)

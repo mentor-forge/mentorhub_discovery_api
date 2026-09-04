@@ -74,7 +74,7 @@ class EventCardService(EventService):
     Bound to `create_event_get_routes` so `/api/cards/events` returns `Card[]`;
     the unprojected documents stay available on `EventService`. Event cards have
     no `link`. Card `name` is the Event `type`; `description` is Markdown with
-    the Event `type`, Profile `full_name`, and `created.at_time`.
+    the Event `type`, Profile `display_name`, and `created.at_time`.
     """
 
     @classmethod
@@ -99,13 +99,13 @@ class EventCardService(EventService):
         return str(value)
 
     @classmethod
-    def _event_description(cls, event_type, full_name, at_time):
-        """Markdown body: event type, profile full_name, and created.at_time."""
+    def _event_description(cls, event_type, display_name, at_time):
+        """Markdown body: event type, Profile display_name, and created.at_time."""
         lines = []
         if event_type:
             lines.append(str(event_type))
-        if full_name:
-            lines.append(str(full_name))
+        if display_name:
+            lines.append(str(display_name))
         formatted = cls._format_at_time(at_time)
         if formatted:
             lines.append(formatted)
@@ -117,17 +117,19 @@ class EventCardService(EventService):
     def _enrich_events(cls, events):
         """Copy each Event and set Card description from type, name, and time."""
         events = events or []
-        names = ProfileService.full_names_for_ids(
+        names = ProfileService.display_names_for_ids(
             [cls._event_profile_id(event) for event in events]
         )
         enriched = []
         for event in events:
             source = dict(event)
             profile_id = cls._event_profile_id(event)
-            full_name = names.get(str(profile_id)) if profile_id is not None else None
+            display_name = (
+                names.get(str(profile_id)) if profile_id is not None else None
+            )
             created = event.get("created") or {}
             description = cls._event_description(
-                event.get("type"), full_name, created.get("at_time")
+                event.get("type"), display_name, created.get("at_time")
             )
             if description:
                 source["description"] = description

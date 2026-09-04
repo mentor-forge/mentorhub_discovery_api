@@ -4,7 +4,7 @@ Discovery Profile service.
 Discovery **consumes** Profile: the shared consume surface (get-by-token,
 get-by-id, paginated list) is inherited unchanged. The Discovery-only additions
 are the identity-scoped Member and Mentee lists that back the composite home
-Card endpoints, and a batched ``full_name`` lookup used by Event cards.
+Card endpoints, and a batched ``display_name`` lookup used by Event cards.
 """
 
 import logging
@@ -26,11 +26,27 @@ from api_utils.services.profile_service import (
     ARCHIVED_STATUS,
     DATE_PROPERTIES,
     ID_PROPERTIES,
-    PROFILE_LIST_FILTERS,
-    PROFILE_LIST_ORDER,
 )
 
 logger = logging.getLogger(__name__)
+
+PROFILE_LIST_FILTERS = {
+    "display_name": {"type": "contains", "field": "display_name"},
+    "email": {"type": "contains", "field": "email"},
+    "description": {"type": "contains", "field": "description"},
+    "status": {"type": "in_list", "field": "status"},
+    "roles": {"type": "in_list", "field": "roles"},
+}
+PROFILE_LIST_ORDER = {
+    "default": {"field": "display_name", "order": "asc"},
+    "allowed": {
+        "display_name": ("asc", "desc"),
+        "email": ("asc", "desc"),
+        "status": ("asc", "desc"),
+        "created.at_time": ("asc", "desc"),
+        "saved.at_time": ("asc", "desc"),
+    },
+}
 
 
 def mentor_scope_id(token):
@@ -143,7 +159,7 @@ class ProfileService(SharedProfileService):
             offset: Zero-based start index
             size: Number of documents to return
             filters: Parsed filter dict from parse_filter_params
-            sort_by: PyMongo sort list from build_sort_by; default name asc
+            sort_by: PyMongo sort list from build_sort_by; default display_name asc
 
         Returns:
             list: Profile documents for the caller's customer
@@ -185,7 +201,7 @@ class ProfileService(SharedProfileService):
             offset: Zero-based start index
             size: Number of documents to return
             filters: Parsed filter dict from parse_filter_params
-            sort_by: PyMongo sort list from build_sort_by; default name asc
+            sort_by: PyMongo sort list from build_sort_by; default display_name asc
 
         Returns:
             list: Profile documents for the caller's mentees
@@ -229,9 +245,9 @@ class ProfileService(SharedProfileService):
         return profiles
 
     @classmethod
-    def full_names_for_ids(cls, profile_ids):
+    def display_names_for_ids(cls, profile_ids):
         """
-        Map Profile ids to ``full_name`` (falling back to ``name``).
+        Map Profile ids to their authoritative ``display_name``.
 
         Used by Event cards after the Event list is already outbound-scoped.
         Does not apply Profile outbound RBAC.
@@ -264,13 +280,13 @@ class ProfileService(SharedProfileService):
         docs = mongo.get_documents(
             config.PROFILE_COLLECTION_NAME,
             match={"_id": {"$in": unique_ids}},
-            project={"full_name": 1, "name": 1},
+            project={"display_name": 1},
         )
 
         names = {}
         for doc in docs or []:
             doc_id = doc.get("_id")
-            display = doc.get("full_name") or doc.get("name")
+            display = doc.get("display_name")
             if doc_id is None or not display:
                 continue
             names[str(doc_id)] = display

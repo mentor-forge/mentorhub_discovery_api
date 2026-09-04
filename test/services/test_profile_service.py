@@ -136,7 +136,7 @@ class TestGetMenteeProfiles(unittest.TestCase):
         self.assertEqual(self._mentor_id_in_match(), ObjectId(PROFILE_ID))
 
 
-class TestFullNamesForIds(unittest.TestCase):
+class TestDisplayNamesForIds(unittest.TestCase):
     """Batch Profile display names for Event card descriptions."""
 
     def setUp(self):
@@ -159,28 +159,30 @@ class TestFullNamesForIds(unittest.TestCase):
         mongo_patcher.start()
 
     def test_returns_empty_without_io_when_ids_missing(self):
-        self.assertEqual(ProfileService.full_names_for_ids([]), {})
-        self.assertEqual(ProfileService.full_names_for_ids([None, ""]), {})
+        self.assertEqual(ProfileService.display_names_for_ids([]), {})
+        self.assertEqual(ProfileService.display_names_for_ids([None, ""]), {})
         self.mongo.get_documents.assert_not_called()
 
-    def test_batches_unique_ids_and_prefers_full_name(self):
+    def test_batches_unique_ids_and_returns_display_name(self):
         profile_oid = ObjectId(PROFILE_ID)
         other_oid = ObjectId("665f1c2a9b1e4c0a1b2c3d99")
         self.mongo.get_documents.return_value = [
-            {"_id": profile_oid, "full_name": "Jane Explorer", "name": "jane"},
-            {"_id": other_oid, "name": "pat"},
+            {"_id": profile_oid, "display_name": "Jane Explorer"},
+            {"_id": other_oid, "display_name": "Pat Mentor"},
         ]
 
-        names = ProfileService.full_names_for_ids([PROFILE_ID, profile_oid, other_oid])
+        names = ProfileService.display_names_for_ids(
+            [PROFILE_ID, profile_oid, other_oid]
+        )
 
         self.mongo.get_documents.assert_called_once_with(
             "Profile",
             match={"_id": {"$in": [profile_oid, other_oid]}},
-            project={"full_name": 1, "name": 1},
+            project={"display_name": 1},
         )
         self.assertEqual(
             names,
-            {PROFILE_ID: "Jane Explorer", str(other_oid): "pat"},
+            {PROFILE_ID: "Jane Explorer", str(other_oid): "Pat Mentor"},
         )
 
 

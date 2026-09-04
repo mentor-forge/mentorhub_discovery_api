@@ -65,7 +65,7 @@ pipenv run lint
 
 ## api-utils notes
 
-This API pins **`api-utils==1.0.0`** from CodeArtifact. In 1.0.0, list GETs return a plain JSON
+This API pins **`api-utils==1.0.3`** from CodeArtifact. Since 1.0.1, list GETs return a plain JSON
 **array** and paginate with the `offset` and `size` **request headers** (defaults `0` / `20`, max
 `100`) — there is no cursor envelope and no infinite-scroll helper. MongoDB I/O goes through
 `MongoIO` (`get_document`, `get_documents`, `create_document`, `update_document`,
@@ -82,7 +82,7 @@ See the [Open API Specifications](./docs/openapi.yaml) for details on the API.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/cards` | Composite home Card list (Notifications, then role-gated Products / Discounts / Logs, Customer, Members, Mentees, Learning Journey). Every card has `type` and a relative SPA `link`. |
-| `GET /api/cards/{type}` | Typed Card list — `events`, `notifications`, `paths`, `plans`, `resources`. Event cards omit `link`; `name` is the Event `type` and `description` is Markdown with type, Profile `full_name`, and `created.at_time`. |
+| `GET /api/cards/{type}` | Typed Card list — `events`, `notifications`, `paths`, `plans`, `resources`. Event cards omit `link`; `name` is the Event `type` and `description` is Markdown with type, Profile `display_name`, and `created.at_time`. |
 | `GET /api/cards/notifications` | Notification Cards (`type: Notification`, `link: discovery/notification/{id}`). Query params `name` (contains) and `status` (`active` / `archived`) are **admin-only**; a non-admin caller that sends either receives `403`. |
 | `POST /api/notification` | Create a Notification (returns a Notification document, not a Card) |
 | `POST /api/notification/dismiss/{notification_id}` | Dismiss a Notification |
