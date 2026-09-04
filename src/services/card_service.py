@@ -51,7 +51,7 @@ CARD_TYPE_RESOURCES = "resources"
 
 # Card field -> ordered source field candidates; the first present value wins.
 _NAMED_FIELDS = {"name": ("name",), "description": ("description",)}
-_PROFILE_FIELDS = {"name": ("full_name", "name"), "description": ("description",)}
+_PROFILE_FIELDS = {"name": ("display_name",), "description": ("description",)}
 _NOTIFICATION_FIELDS = {"name": ("name",), "description": ("message",)}
 _EVENT_FIELDS = {"name": ("type",), "description": ("description",)}
 
