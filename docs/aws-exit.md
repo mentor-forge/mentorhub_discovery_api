@@ -8,7 +8,7 @@ README’s 1.0.3 reference and the older F160/F161 notes describe earlier pins.
 | --- | --- | --- |
 | `Pipfile`, `Pipfile.lock`, `scripts/pipenv-install.sh`, `scripts/pipenv-lock.sh` | CodeArtifact source, AWS CLI authentication and temporary authenticated index | F163 uses public PyPI for third-party packages and locks API Utils to the exact GitHub release wheel and SHA-256. Use `pipenv run install` to sync the developer environment and `pipenv lock` to refresh the lock. |
 | `Dockerfile`, `scripts/docker-build.sh` | Authenticated `PIP_INDEX_URL` build argument populated by AWS CLI | F164 will build from the hash-verified lock using public sources and preserve the existing image and port. |
-| `.github/workflows/docker-push.yml`, `.github/OIDC.md` | AWS OIDC, CodeArtifact token and index passed to Docker | F165 will remove AWS authentication, preserve main-branch GHCR publishing and add separate read-only PR validation. |
+| `.github/workflows/docker-push.yml`, `.github/OIDC.md` | AWS OIDC, CodeArtifact token and index passed to Docker | F165 removes AWS authentication, preserve main-branch GHCR publishing and add separate read-only PR validation. |
 | `README.md`, `tasks/_PLANNING.md` | Developer setup still references CodeArtifact | F166 will update dependency setup and record runtime and CI acceptance. |
 
 The public [API Utils 1.0.5 wheel](https://github.com/mentor-forge/mentorhub_api_utils/releases/download/v1.0.5/api_utils-1.0.5-py3-none-any.whl)
@@ -56,3 +56,18 @@ All 61 packaged E2E cases passed against fresh MongoDB and the seeded
 Developer Edition configurator on a disposable network. The explorer, OpenAPI
 file, metrics, and authenticated config endpoints returned HTTP 200.
 An unauthenticated card request returned HTTP 401.
+
+## GitHub Actions
+
+Pull requests targeting main verify the dependency lock, sync development
+dependencies, run lint and unit tests, compile Python sources, and build the
+container from the runtime lock. The validation job uses read-only repository
+access, with checkout credential persistence disabled.
+
+The publishing workflow runs on pushes to main. It reads repository contents
+and writes packages to GHCR using the GitHub Actions token, with separate
+builds for Linux AMD64 and ARM64. The public wheel and PyPI supply the image
+dependencies. The former AWS OIDC setup was removed.
+
+Record hosted validation after the pull request opens. Publication is
+verified separately after merge.

@@ -1,6 +1,6 @@
 # F165 – Update API GitHub Actions for AWS-free validation and GHCR publishing
 
-**Status**: Pending
+**Status**: Shipped
 
 **Type**: Feature
 
@@ -77,4 +77,14 @@ AWS inventory, secure backup/restore evidence and separately approved decommissi
 
 ## Execution Notes
 
-Reserved for the execution agent. No implementation, tests, service changes or publication have been performed.
+Replaced the AWS-authenticated publishing flow with a main-only GHCR publisher
+and a separate read-only PR workflow. Removed the obsolete AWS OIDC guide and
+documented workflow permissions in the migration audit.
+
+Parsed both workflow files and checked their triggers, permissions, checkout
+settings, build inputs, image tag, and platforms. Ran the PR workflow's
+dependency lock verification and sync, lint, unit tests (209 passed, with
+84 passing subtests), compilation, and ARM64 Docker build in a clean shell
+environment without AWS variables. The Dockerfile emitted its existing
+shell-form CMD warning. Hosted validation remains to be verified after the
+PR opens, and GHCR publication is verified after merge.
