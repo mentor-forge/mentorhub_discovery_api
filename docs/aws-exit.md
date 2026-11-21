@@ -1,11 +1,12 @@
 # Discovery API AWS exit audit
 
-The active Pipfile and lock pin API Utils 1.0.4 from CodeArtifact. The
+Before migration the Pipfile and lock pinned API Utils 1.0.4 from CodeArtifact.
+The Pipfile and lock now pin the public API Utils 1.0.5 release wheel. The
 README’s 1.0.3 reference and the older F160/F161 notes describe earlier pins.
 
 | Surface | Current dependency | Planned change |
 | --- | --- | --- |
-| `Pipfile`, `Pipfile.lock`, `scripts/pipenv-install.sh`, `scripts/pipenv-lock.sh` | CodeArtifact source, AWS CLI authentication and temporary authenticated index | F163 will use public PyPI for third-party packages and lock API Utils to the exact GitHub release wheel and SHA-256. Preserve `pipenv run install` as the locked developer sync command. |
+| `Pipfile`, `Pipfile.lock`, `scripts/pipenv-install.sh`, `scripts/pipenv-lock.sh` | CodeArtifact source, AWS CLI authentication and temporary authenticated index | F163 uses public PyPI for third-party packages and locks API Utils to the exact GitHub release wheel and SHA-256. Use `pipenv run install` to sync the developer environment and `pipenv lock` to refresh the lock. |
 | `Dockerfile`, `scripts/docker-build.sh` | Authenticated `PIP_INDEX_URL` build argument populated by AWS CLI | F164 will build from the hash-verified lock using public sources and preserve the existing image and port. |
 | `.github/workflows/docker-push.yml`, `.github/OIDC.md` | AWS OIDC, CodeArtifact token and index passed to Docker | F165 will remove AWS authentication, preserve main-branch GHCR publishing and add separate read-only PR validation. |
 | `README.md`, `tasks/_PLANNING.md` | Developer setup still references CodeArtifact | F166 will update dependency setup and record runtime and CI acceptance. |
@@ -13,7 +14,7 @@ README’s 1.0.3 reference and the older F160/F161 notes describe earlier pins.
 The public [API Utils 1.0.5 wheel](https://github.com/mentor-forge/mentorhub_api_utils/releases/download/v1.0.5/api_utils-1.0.5-py3-none-any.whl)
 downloaded without credentials and matched SHA-256
 `79de3829e2baa294497e08925908645bcea53cdf497d02b6bed71322a503d952`.
-Pin that URL and digest together in Pipenv. The PyPI project named
+Pipenv pins that URL and digest together. The PyPI project named
 `api-utils` is unrelated. For a later rollback, restore a previously verified
 wheel pin and its matching lock together, then repeat install and container
 acceptance. This release is the first verified GitHub-hosted rollback floor.

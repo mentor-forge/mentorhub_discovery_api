@@ -1,6 +1,6 @@
 # F163 – Migrate API dependency source and locking to a Release wheel
 
-**Status**: Pending
+**Status**: Shipped
 
 **Type**: Feature
 
@@ -82,4 +82,6 @@ AWS inventory, secure backup/restore evidence and separately approved decommissi
 
 ## Execution Notes
 
-Reserved for the execution agent. No implementation, tests, service changes or publication have been performed.
+- Pinned API Utils 1.0.5 to the verified public GitHub wheel URL and SHA-256. Public PyPI supplies third-party dependencies. Removed the obsolete AWS-only wrappers and kept `pipenv run install` as a locked development sync. Use native `pipenv lock` to regenerate the lock.
+- Confirmed the installed wheel provides Config, MongoIO, Token, the Flask token factory, and the list helper with the expected signatures. The existing personas already supply `display_name` and required `profile_id`. The wheel treats `customer_id` and `mentor_id` as optional scope claims, so the test fixture needed no changes.
+- Regenerated and verified the lock, checked the direct wheel URL and hash in the requirements export and installed distribution metadata, and completed a clean Python 3.12 install and repeat locked sync without AWS credentials. All 209 unit tests and 84 subtests passed. Black and Python compilation passed. The packaged end-to-end gate follows the container migration.
