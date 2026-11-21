@@ -1,6 +1,6 @@
 # F162 – Audit AWS coupling and release prerequisites
 
-**Status**: Pending
+**Status**: Shipped
 
 **Type**: Feature
 
@@ -73,4 +73,4 @@ AWS inventory, secure backup/restore evidence and separately approved decommissi
 
 ## Execution Notes
 
-Reserved for the execution agent. No implementation, tests, service changes or publication have been performed.
+Reviewed the tracked install, lock, container, workflow and runtime call paths and documented the migration and rollback in `docs/aws-exit.md`. Verified the public 1.0.5 wheel digest and inspected its token and MongoIO interfaces. Reviewed the historical F161 blocker against current source. No services were started or changed.
