@@ -1,6 +1,6 @@
 # F166 – Finalize API migration documentation and runtime acceptance
 
-**Status**: Pending
+**Status**: Shipped
 
 **Type**: Feature
 
@@ -74,4 +74,8 @@ AWS inventory, secure backup/restore evidence and separately approved decommissi
 
 ## Execution Notes
 
-Reserved for the execution agent. No implementation, tests, service changes or publication have been performed.
+- Updated developer dependency setup, public wheel lock policy, AWS-free build and CI guidance, rollback, and acceptance evidence.
+- Verified a clean locked install, 209 unit tests and 84 subtests, lint, compilation, and the AWS-free ARM64 container build. Packaged API Utils reported 1.0.5.
+- All 61 packaged end-to-end cases passed on disposable MongoDB and Discovery API services with Developer Edition seed data. The isolated harness used the same package and service dependencies as the repository gate and left the running Developer Edition stack alone.
+- Verified valid mentee access, HTTP 403 for a restricted notification filter, and HTTP 401 for missing bearer credentials or profile claim, wrong issuer, wrong audience, wrong signature, and expired JWTs. The historical Marti home-card failure did not recur. F161 was untouched.
+- Diff check passed. Hosted PR validation can run after the PR opens. Verify GHCR publication after merge.

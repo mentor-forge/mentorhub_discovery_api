@@ -2,14 +2,14 @@
 
 Before migration the Pipfile and lock pinned API Utils 1.0.4 from CodeArtifact.
 The Pipfile and lock now pin the public API Utils 1.0.5 release wheel. The
-README’s 1.0.3 reference and the older F160/F161 notes describe earlier pins.
+older F160/F161 notes describe earlier pins.
 
-| Surface | Current dependency | Planned change |
+| Surface | Previous dependency | Migration |
 | --- | --- | --- |
 | `Pipfile`, `Pipfile.lock`, `scripts/pipenv-install.sh`, `scripts/pipenv-lock.sh` | CodeArtifact source, AWS CLI authentication and temporary authenticated index | F163 uses public PyPI for third-party packages and locks API Utils to the exact GitHub release wheel and SHA-256. Use `pipenv run install` to sync the developer environment and `pipenv lock` to refresh the lock. |
-| `Dockerfile`, `scripts/docker-build.sh` | Authenticated `PIP_INDEX_URL` build argument populated by AWS CLI | F164 will build from the hash-verified lock using public sources and preserve the existing image and port. |
-| `.github/workflows/docker-push.yml`, `.github/OIDC.md` | AWS OIDC, CodeArtifact token and index passed to Docker | F165 removes AWS authentication, preserve main-branch GHCR publishing and add separate read-only PR validation. |
-| `README.md`, `tasks/_PLANNING.md` | Developer setup still references CodeArtifact | F166 will update dependency setup and record runtime and CI acceptance. |
+| `Dockerfile`, `scripts/docker-build.sh` | Authenticated `PIP_INDEX_URL` build argument populated by AWS CLI | F164 builds from the hash-verified lock using public sources and preserves the existing image and port. |
+| `.github/workflows/docker-push.yml`, `.github/OIDC.md` | AWS OIDC, CodeArtifact token and index passed to Docker | F165 removes AWS authentication, preserves main-branch GHCR publishing, and adds separate read-only PR validation. |
+| `README.md`, `tasks/_PLANNING.md` | Developer setup referenced CodeArtifact | F166 documents the locked install and records runtime and CI acceptance. |
 
 The public [API Utils 1.0.5 wheel](https://github.com/mentor-forge/mentorhub_api_utils/releases/download/v1.0.5/api_utils-1.0.5-py3-none-any.whl)
 downloaded without credentials and matched SHA-256
@@ -29,8 +29,9 @@ requires `profile_id` and maps `display_name`, `user_id`, `roles`,
 `profile_id`, `customer_id` and `mentor_id` for local persona tokens.
 Discovery's E2E fixtures already mint `display_name` and `profile_id`.
 The F161 blocked note reports a historical Profile-to-Card projection
-failure. Current source projects Profile `display_name`; rerun packaged
-E2E acceptance from this branch to verify it. F161 remains outside this wave.
+failure. The current branch projects Profile `display_name` onto Card `name`,
+and the previously failing Marti home-card case passed in packaged acceptance.
+F161 remains outside this wave.
 
 Keep database calls through MongoIO. The published wheel supports
 `get_documents(collection_name, match, project, sort_by, skip, limit)`,
@@ -71,3 +72,19 @@ dependencies. The former AWS OIDC setup was removed.
 
 Record hosted validation after the pull request opens. Publication is
 verified separately after merge.
+
+## Final local acceptance
+
+On November 21, 2026, lock verification, a clean locked development install,
+209 unit tests and 84 subtests, lint, compilation, and the AWS-free ARM64 image
+build passed. The packaged API reported API Utils 1.0.5. All 61 packaged
+end-to-end tests passed against disposable MongoDB and Developer Edition seed
+data. The explorer, OpenAPI, metrics, and authenticated config returned HTTP
+200. A valid mentee could list home cards but received HTTP 403 for a restricted
+notification filter. Missing bearer credentials, a missing profile claim,
+wrong issuer, wrong audience, wrong signature, and an expired token all
+returned HTTP 401. No production identity-provider integration was needed.
+
+The build reported the existing shell-form CMD warning, and JWT tests reported
+the short Developer Edition test key warning. Hosted PR CI and post-merge GHCR
+publication are separate from this local acceptance.
