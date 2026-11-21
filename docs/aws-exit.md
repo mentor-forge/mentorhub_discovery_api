@@ -41,3 +41,18 @@ Keep database calls through MongoIO. The published wheel supports
 `offset`, `size` and `project` after `collection_name`. These APIs retain
 existing service ownership. No Discovery schema, OpenAPI or production
 identity-provider changes are required for the migration.
+
+## Container build
+
+Run `pipenv run container` to build the Discovery API image with the committed
+runtime lock. Pipenv exports requirements with hashes, and pip enforces those
+hashes while downloading the public API Utils wheel and its dependencies. The
+default image remains `ghcr.io/mentor-forge/mentorhub_discovery_api:latest`.
+Set `DISCOVERY_API_IMAGE` to give an isolated local build its own tag.
+
+A clean-environment ARM64 build passed. The final image reported API Utils
+1.0.5 installed from the pinned GitHub release wheel with the expected SHA-256.
+All 61 packaged E2E cases passed against fresh MongoDB and the seeded
+Developer Edition configurator on a disposable network. The explorer, OpenAPI
+file, metrics, and authenticated config endpoints returned HTTP 200.
+An unauthenticated card request returned HTTP 401.

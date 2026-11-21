@@ -1,6 +1,6 @@
 # F164 – Remove AWS auth from API Docker builds
 
-**Status**: Pending
+**Status**: Shipped
 
 **Type**: Feature
 
@@ -76,4 +76,16 @@ AWS inventory, secure backup/restore evidence and separately approved decommissi
 
 ## Execution Notes
 
-Reserved for the execution agent. No implementation, tests, service changes or publication have been performed.
+Removed the CodeArtifact Docker build argument and AWS token lookup. The build
+exports hashed locked requirements and preserves its existing runtime and GHCR
+tag. `DISCOVERY_API_IMAGE` allows an isolated build tag.
+
+Verified the exported wheel URL/hash and installed API Utils 1.0.5 origin
+inside the final ARM64 image. The build passed with a clean environment, and
+image history had no CodeArtifact, custom package index, or AWS profile
+arguments. All 61 packaged E2E tests passed with standard Developer Edition
+JWT settings, disposable seeded MongoDB, and a separate loopback port. The
+explorer, OpenAPI, metrics, and authenticated config endpoints returned 200.
+An unauthenticated card request returned 401. The shared running stack was
+left untouched. Docker reported the existing shell-form CMD warning. PyJWT
+warned about the standard Developer Edition test key length.
