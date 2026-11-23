@@ -7,7 +7,7 @@
 ## Developer Commands
 
 ```bash
-## Install dependencies (run `mh` first for CodeArtifact auth)
+## Install development dependencies from the committed lock
 pipenv run install
 
 # start backing db container
@@ -65,7 +65,17 @@ pipenv run lint
 
 ## api-utils notes
 
-This API pins **`api-utils==1.0.3`** from CodeArtifact. Since 1.0.1, list GETs return a plain JSON
+This API pins the public [API Utils 1.0.5 release wheel](https://github.com/mentor-forge/mentorhub_api_utils/releases/download/v1.0.5/api_utils-1.0.5-py3-none-any.whl)
+by its exact URL and SHA-256 in the committed Pipenv lock. Other dependencies
+resolve from public PyPI. Use `pipenv run install` to sync the lock and
+`pipenv lock` to regenerate it for intentional dependency changes. Keep the
+wheel pin and its matching lockfile together when updating or rolling back.
+
+The local container build and pull request validation use the committed lock
+without AWS credentials. Pushes to main publish the multi-platform image to
+GHCR. See [migration and rollback details](./docs/aws-exit.md).
+
+Since 1.0.1, list GETs return a plain JSON
 **array** and paginate with the `offset` and `size` **request headers** (defaults `0` / `20`, max
 `100`) — there is no cursor envelope and no infinite-scroll helper. MongoDB I/O goes through
 `MongoIO` (`get_document`, `get_documents`, `create_document`, `update_document`,

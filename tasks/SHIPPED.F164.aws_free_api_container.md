@@ -1,0 +1,91 @@
+# F164 – Remove AWS auth from API Docker builds
+
+**Status**: Shipped
+
+**Type**: Feature
+
+**Depends On**: F163
+
+**Description**: Remove AWS dependencies and migrate builds/packages off CodeArtifact — remove aws auth from api docker builds.
+
+**Issue**: [I-DA01](https://github.com/mentor-forge/mentorhub_discovery_api/issues/18)
+
+## Path anchoring
+
+All output paths are relative to this repository root. Sibling references are read-only context permitted by the repo planning guide.
+
+## Context
+
+- `README.md`
+- `tasks/_PLANNING.md`
+- `tasks/_ORCHESTRATE.md`
+- `../mentorhub/DeveloperEdition/standards/ArchitecturePrinciples.md`
+- `../mentorhub/DeveloperEdition/standards/sre_standards.md`
+- `../mentorhub/DeveloperEdition/standards/api_standards.md`
+- `../mentorhub_api_utils/README.md`
+- `../mentorhub_api_utils/api_utils/flask_utils/token.py`
+- `../mentorhub_api_utils/api_utils/mongo_utils/mongo_io.py`
+- `Dockerfile`
+- `scripts/docker-build.sh`
+
+Source issue is authoritative for this migration. The agreed migration supersedes old CodeArtifact-auth prerequisites only in the paths explicitly migrated by these tasks; do not rewrite unrelated framework rules.
+
+## Goals
+
+- Remove ARG PIP_INDEX_URL, CodeArtifact index/token construction and shared home auth helper dependency from Dockerfile and docker-build.sh. Install public transitives and exact wheel from the committed lock/exported direct URLs, preserving hashes where supported.
+- Preserve multi-stage build, compile step, runtime port/entrypoint/docs and GHCR image identity. Remove only now-obsolete AWS auth wiring; do not introduce GitHub tokens for public wheel downloads.
+- Ensure build failures remain actionable and no credentials are stored in layers, arguments or logs. Keep pipenv run container working without AWS CLI or mh login.
+
+### Craftsmanship Expectations
+
+Keep package, auth and deployment ownership in the existing shared modules. Preserve APIs and runtime contracts unless the recorded migration decision explicitly requires a change; remove obsolete AWS auth knowledge rather than duplicate it. Keep every dependency reference reproducible.
+
+## Testing Expectations
+
+These checks are for future execution; none were run while creating this plan.
+
+- Run pipenv run container without AWS environment/auth helpers and inspect installed wheel origin/version in the image. Run pipenv run api then pipenv run e2e with existing local JWT settings; verify /docs, config, metrics and negative authorization cases. Check locked direct URL is not lost by requirements export.
+
+## Outputs
+
+- `Dockerfile`
+- `scripts/docker-build.sh`
+- `docs/aws-exit.md`
+
+Only these implementation files may change. The orchestrator may also update/rename this task record under the established lifecycle.
+
+## Execution boundary
+
+This is a reviewable plan, not an execution record. Execute only this task's listed outputs when orchestration is separately authorized. Do not touch excluded MongoDB/Runbook utility repos, publish packages/tags, mutate issue/project state, or delete/provision AWS resources as a side effect. Future workflow publication happens only through the reviewed maintainer release path.
+
+Where a task requires an unpublished release, unavailable live schema or operator evidence, stop execution at that prerequisite and report it; do not guess values or substitute the unrelated PyPI api-utils package. Pending status describes the plan's review state, not proof that external execution gates are satisfied.
+
+## External prerequisites
+
+API utils release and verified wheel URL/hash: https://github.com/mentor-forge/mentorhub_api_utils/issues/36. Cloud-agnostic local configuration and integration boundary: https://github.com/mentor-forge/mentorhub/issues/80. No production identity/hosting decision blocks this package/build work. These are execution gates, not local task dependencies. No excluded utility-repo changes are authorized.
+
+## Cloud-agnostic deployment boundary
+
+The deliverable is a cloud-agnostic **local** deployment plus the agreed GitHub dependency/build migration. Existing identity/hosting implementations are largely placeholders: audit actual executable dependencies before proposing changes. Selecting, implementing or migrating to a production IdP/hosting provider is not a prerequisite for library releases, journey package/build/CI changes or local acceptance.
+
+Keep application-facing backing-service contracts and environment settings provider neutral. Concentrate necessary integration changes in Admin API and DeveloperEdition/docker-compose.yaml where inspection proves coupling; preserve the existing shared JWT/redirect contracts and local persona/mocked-service behavior. Do not create per-journey provider adapters, new identity schemas or a general multi-cloud framework speculatively.
+
+Cloud-specific provisioning, backing-service configuration, identity-provider wiring, roles/secrets and deployment overlays belong to the relevant infrastructure repo: mentorhub_cloudformation owns AWS, including future CodeArtifact provisioning. Future separate repos may implement Google, Microsoft/Azure, IBM or Red Hat platforms against the same contracts; do not create or implement them in this effort. Core compose must not require AWS accounts, credentials or endpoints. A locally optional emulator is not a live AWS dependency; retain it only if useful without making it a required cloud-specific integration.
+
+AWS inventory, secure backup/restore evidence and separately approved decommissioning remain I-S01 responsibilities. Production provider selection or a live production cutover is future infrastructure/integration work, not an acceptance gate for the cloud-agnostic local stack.
+
+## Execution Notes
+
+Removed the CodeArtifact Docker build argument and AWS token lookup. The build
+exports hashed locked requirements and preserves its existing runtime and GHCR
+tag. `DISCOVERY_API_IMAGE` allows an isolated build tag.
+
+Verified the exported wheel URL/hash and installed API Utils 1.0.5 origin
+inside the final ARM64 image. The build passed with a clean environment, and
+image history had no CodeArtifact, custom package index, or AWS profile
+arguments. All 61 packaged E2E tests passed with standard Developer Edition
+JWT settings, disposable seeded MongoDB, and a separate loopback port. The
+explorer, OpenAPI, metrics, and authenticated config endpoints returned 200.
+An unauthenticated card request returned 401. The shared running stack was
+left untouched. Docker reported the existing shell-form CMD warning. PyJWT
+warned about the standard Developer Edition test key length.
