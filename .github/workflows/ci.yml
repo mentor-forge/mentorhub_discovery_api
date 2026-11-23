@@ -35,4 +35,9 @@ jobs:
           pipenv run build
 
       - name: Build container
-        run: DISCOVERY_API_IMAGE=mentorhub-discovery-api:ci pipenv run container
+        env:
+          DISCOVERY_API_IMAGE: mentorhub-discovery-api:ci
+        run: |
+          export BUILT_AT="$(date -u +'%Y%m%d-%H%M%S')"
+          pipenv run container
+          test "$(docker run --rm --entrypoint cat "$DISCOVERY_API_IMAGE" /opt/api_server/BUILT_AT)" = "$BUILT_AT"
